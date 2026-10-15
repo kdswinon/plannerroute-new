@@ -68,7 +68,7 @@ public class MainActivity extends Activity {
         root.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets.consumeSystemWindowInsets();});
         LinearLayout header=row();header.setPadding(dp(20),dp(10),dp(14),dp(8));LinearLayout title=column();title.addView(text("PLANNERROUTE",11,ORANGE));title.addView(heading(new String[]{"오늘의 방문 동선","업체 관리","동선 지도","오늘의 통계"}[page],25));header.addView(title,new LinearLayout.LayoutParams(0,-2,1));header.addView(button("설정",false,this::settings));root.addView(header);
         ScrollView scroll=new ScrollView(this);contentScroll=scroll;scroll.setFillViewport(true);body=column();body.setPadding(dp(16),dp(8),dp(16),dp(16));scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));scroll.post(()->scroll.scrollTo(0,scrollY));
-        if(!status.isEmpty()){LinearLayout c=card(body);c.addView(text(status,14,ORANGE));}
+        if(!status.isEmpty()){LinearLayout c=card(body);c.addView(text(status,14,ORANGE));if(data.recoveryRequired)full(c,button("백업 파일에서 복구",false,this::backup));}
         if(page==0)today();else if(page==1)companies();else if(page==2)mapPage();else statistics();
         nav=row();nav.setPadding(dp(6),dp(6),dp(6),dp(6));nav.setBackgroundColor(CARD);String[] labels={"◉\n오늘 동선","▤\n업체 관리","⌖\n지도","▥\n통계"};
         for(int i=0;i<4;i++){final int tab=i;Button b=button(labels[i],false,()->{page=tab;pickMode=0;render();});b.setTextColor(page==i?ORANGE:MUTED);b.setBackground(bg(page==i?SECOND:CARD,14));b.setContentDescription(new String[]{"오늘 동선","업체 관리","지도","통계"}[i]);weighted(nav,b);}root.addView(nav);updateMap(false);
@@ -110,7 +110,7 @@ public class MainActivity extends Activity {
         if(!mapError.isEmpty()){c.addView(text(mapError,14,ORANGE));full(c,button("지도 다시 불러오기",false,this::loadStyle));}
         c.addView(mapView,new LinearLayout.LayoutParams(-1,dp(height)));c.addView(text("● 출발   1–40 방문 순서   ● 도착\n© OpenFreeMap · OpenMapTiles · OpenStreetMap · 검색 Photon",11,MUTED));}
     void pick(int mode){pickMode=mode;page=2;render();}
-    void changed(){revision++;result=null;status="";if(!data.save())status="저장 공간을 확인해 주세요. 이번 변경을 저장하지 못했습니다.";updateMap(false);}
+    void changed(){revision++;result=null;status="";if(!data.save())status=data.recoveryRequired?"원본 저장자료를 보호하기 위해 저장을 중단했습니다. 정상 백업 파일을 가져와 주세요.":"저장 공간을 확인해 주세요. 이번 변경을 저장하지 못했습니다.";updateMap(false);}
     void optimize(){if(busy)return;if(data.start==null){toast("출발지를 먼저 선택해 주세요.");return;}if(data.endMode==2&&data.destination==null){toast("도착지를 먼저 선택해 주세요.");return;}
         List<Data.Place> selected=data.selected();if(selected.isEmpty()||selected.size()>40){toast("업체를 1~40개 선택해 주세요.");return;}
         final int token=revision,mode=data.endMode;Data.Place start=data.start,end=data.destination;busy=true;status="도로 이동시간을 비교하고 있습니다.";render();
@@ -118,9 +118,9 @@ public class MainActivity extends Activity {
     }
     void search(Action<Data.Place> done){LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));EditText q=input(v,"주소 또는 장소명","",1);v.addView(text("검색 버튼을 눌러 조회합니다. 검색 결과가 없으면 지도에서 선택해 주세요.",13,MUTED));
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("주소·장소 검색").setView(v).setNegativeButton("취소",null).setPositiveButton("검색",null).create();dialog.setOnShowListener(x->dialog.getButton(-1).setOnClickListener(x2->{String query=q.getText().toString().trim();if(query.length()<2){q.setError("두 글자 이상 입력해 주세요.");return;}Button b=dialog.getButton(-1);b.setEnabled(false);b.setText("검색 중…");
-            worker.execute(()->{try{List<Data.Place> found=routing.search(query);handler.post(()->{if(isDestroyed())return;b.setEnabled(true);b.setText("검색");if(found.isEmpty()){toast("검색 결과가 없습니다. 지도에서 위치를 선택할 수 있습니다.");return;}String[] names=found.stream().map(p->p.name+"\n"+p.address).toArray(String[]::new);new AlertDialog.Builder(this).setTitle("검색 결과 확인").setItems(names,(d,i)->{dialog.dismiss();done.accept(found.get(i));}).setNegativeButton("취소",null).show();});}catch(Exception e){handler.post(()->{b.setEnabled(true);b.setText("검색");toast("검색 실패 · "+message(e));});}});
+            worker.execute(()->{try{List<Data.Place> found=routing.search(query);handler.post(()->{if(isFinishing()||isDestroyed()||!dialog.isShowing())return;b.setEnabled(true);b.setText("검색");if(found.isEmpty()){toast("검색 결과가 없습니다. 지도에서 위치를 선택할 수 있습니다.");return;}String[] names=found.stream().map(p->p.name+"\n"+p.address).toArray(String[]::new);new AlertDialog.Builder(this).setTitle("검색 결과 확인").setItems(names,(d,i)->{dialog.dismiss();done.accept(found.get(i));}).setNegativeButton("취소",null).show();});}catch(Exception e){handler.post(()->{if(isFinishing()||isDestroyed()||!dialog.isShowing())return;b.setEnabled(true);b.setText("검색");toast("검색 실패 · "+message(e));});}});
         }));dialog.show();}
-    void editCompany(Data.Place old,Data.Place seed){LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));ScrollView scroll=new ScrollView(this);scroll.addView(v);Data.Place p=old!=null?old:seed;final Data.Place[] location={p};
+    void editCompany(Data.Place old,Data.Place seed){if(data.recoveryRequired){toast("원본 보호를 위해 백업 파일을 먼저 복구해 주세요.");return;}if(old==null&&data.places.size()>=2000){toast("업체는 최대 2,000개 등록할 수 있습니다.");return;}LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));ScrollView scroll=new ScrollView(this);scroll.addView(v);Data.Place p=old!=null?old:seed;final Data.Place[] location={p};
         EditText name=input(v,"업체명",p==null?"":p.name,1);TextView address=text(p==null?"위치가 지정되지 않았습니다.":p.address,14,MUTED);v.addView(address);
         EditText lat=input(v,"위도 (지도 좌표 직접 입력 가능)",p==null?"":Double.toString(p.lat),8194|4096),lon=input(v,"경도",p==null?"":Double.toString(p.lon),8194|4096);
         full(v,button("주소·장소 검색",false,()->search(found->{location[0]=found;address.setText(found.address);lat.setText(Double.toString(found.lat));lon.setText(Double.toString(found.lon));if(name.getText().toString().trim().isEmpty())name.setText(found.name);})));
@@ -129,6 +129,7 @@ public class MainActivity extends Activity {
         AlertDialog d=new AlertDialog.Builder(this).setTitle(old==null?"업체 등록":"업체 수정").setView(scroll).setNegativeButton("취소",null).setPositiveButton("저장",null).create();
         name.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(200)});
         d.setOnShowListener(x->d.getButton(-1).setOnClickListener(w->{try{String label=name.getText().toString().trim();if(label.isEmpty()||label.length()>200)throw new Exception("업체명을 1~200자로 입력해 주세요.");
+            if(old==null&&data.places.size()>=2000)throw new Exception("업체는 최대 2,000개 등록할 수 있습니다.");
             String latStr=lat.getText().toString().trim(),lonStr=lon.getText().toString().trim();
             double la=!latStr.isEmpty()?Double.parseDouble(latStr):location[0]!=null?location[0].lat:Double.NaN;
             double lo=!lonStr.isEmpty()?Double.parseDouble(lonStr):location[0]!=null?location[0].lon:Double.NaN;
@@ -178,7 +179,7 @@ public class MainActivity extends Activity {
     void openWeb(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException e){toast("링크를 열 브라우저가 없습니다.");}}
     void backup(){new AlertDialog.Builder(this).setTitle("업체 데이터 백업").setItems(new String[]{"JSON 내보내기","JSON 가져오기"},(d,i)->{try{Intent intent=new Intent(i==0?Intent.ACTION_CREATE_DOCUMENT:Intent.ACTION_OPEN_DOCUMENT);intent.setType("application/json");intent.addCategory(Intent.CATEGORY_OPENABLE);if(i==0)intent.putExtra(Intent.EXTRA_TITLE,"plannerroute-backup.json");startActivityForResult(intent,i==0?21:22);}catch(ActivityNotFoundException e){toast("휴대폰의 파일 앱을 활성화해 주세요.");}}).show();}
     @Override protected void onActivityResult(int request,int code,Intent intent){super.onActivityResult(request,code,intent);if(code!=RESULT_OK||intent==null||intent.getData()==null)return;Uri uri=intent.getData();
-        try{if(request==21){try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException("파일을 열 수 없습니다.");out.write(data.json().toString(2).getBytes(StandardCharsets.UTF_8));}toast("백업 파일을 저장했습니다.");}
+        try{if(request==21){try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException("파일을 열 수 없습니다.");String backup=data.recoveryRequired?data.prefs.getString("data",""):data.json().toString(2);out.write(backup.getBytes(StandardCharsets.UTF_8));}toast(data.recoveryRequired?"읽기에 실패한 원본을 복구용 파일로 보관했습니다.":"백업 파일을 저장했습니다.");}
             else if(request==22){byte[] bytes;try(InputStream in=getContentResolver().openInputStream(uri);ByteArrayOutputStream out=new ByteArrayOutputStream()){if(in==null)throw new IOException("파일을 열 수 없습니다.");byte[] b=new byte[4096];int n;while((n=in.read(b))!=-1){if(out.size()+n>2_000_000)throw new IOException("백업 파일은 2MB 이하여야 합니다.");out.write(b,0,n);}bytes=out.toByteArray();}
                 JSONObject incoming=new JSONObject(new String(bytes,StandardCharsets.UTF_8));Data checked=new Data(this);checked.restore(incoming);
                 new AlertDialog.Builder(this).setTitle("백업 가져오기").setMessage("업체 "+checked.places.size()+"개를 가져옵니다. 현재 업체와 출발지 설정을 교체합니다. 필요한 경우 먼저 내보내기 해 주세요.").setNegativeButton("취소",null).setPositiveButton("교체하여 가져오기",(d,w)->{try{data.restore(incoming);changed();render();}catch(Exception e){toast(message(e));}}).show();}
@@ -188,7 +189,7 @@ public class MainActivity extends Activity {
         v.addView(text("OSRM 시간은 실시간 교통·국내 통행 제한을 모두 반영하지 않습니다. 실제 운전은 내비게이션 안내를 따르세요.",14,ORANGE));
         EditText route=input(v,"도로 서버 HTTPS 주소",data.endpoint("routing"),17),search=input(v,"장소 검색 서버 HTTPS 주소",data.endpoint("search"),17),style=input(v,"지도 스타일 HTTPS 주소",data.endpoint("style"),17);
         full(v,button("JSON 백업 · 가져오기",false,this::backup));full(v,button("지도 데이터 출처",false,()->openWeb("https://www.openstreetmap.org/copyright")));
-        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.0").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
+        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.1").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
         d.setOnShowListener(x->d.getButton(-1).setOnClickListener(w->{String[] values={route.getText().toString().trim(),search.getText().toString().trim(),style.getText().toString().trim()};for(String s:values){Uri u=Uri.parse(s);if(!"https".equals(u.getScheme())||u.getHost()==null||u.getUserInfo()!=null||u.getQuery()!=null||u.getFragment()!=null){toast("인증정보나 쿼리 없는 HTTPS 주소를 입력해 주세요.");return;}}
             data.prefs.edit().putString("routing",values[0].replaceAll("/+$","")).putString("search",values[1].replaceAll("/+$","")).putString("style",values[2]).apply();revision++;result=null;d.dismiss();loadStyle();render();}));d.show();
     }

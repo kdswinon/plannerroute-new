@@ -11,7 +11,8 @@ import java.util.*;
 final class Routing {
     final File cache;
     final Data data;
-    Routing(Context c,Data data) {this.data=data;cache=new File(c.getCacheDir(),"roads");cache.mkdirs();}
+    Routing(Context c,Data data) {this(new File(c.getCacheDir(),"roads"),data);}
+    Routing(File cache,Data data) {this.data=data;this.cache=cache;cache.mkdirs();}
     JSONObject get(String url,long ttl) throws Exception {
         StringBuilder hash=new StringBuilder();for(byte b:MessageDigest.getInstance("SHA-256").digest(url.getBytes(StandardCharsets.UTF_8)))hash.append(String.format(Locale.ROOT,"%02x",b&255));String key=hash.toString();
         File f=new File(cache,key+".json");

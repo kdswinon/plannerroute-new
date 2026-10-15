@@ -22,17 +22,30 @@ final class Data {
             String name=j.getString("name").trim();
             if(name.isEmpty()||name.length()>200) throw new JSONException("업체명을 확인해 주세요.");
             Place p=new Place(name,lat,lon); p.id=j.optString("id",p.id); p.address=j.optString("address");
-            p.phone=j.optString("phone"); p.memo=j.optString("memo"); p.minutes=j.optInt("minutes",20);
-            if(p.minutes<0||p.minutes>1440) throw new JSONException("상담시간은 0~1440분입니다.");
+            if(p.id.trim().isEmpty()) throw new JSONException("업체 ID가 비어 있습니다.");
+            p.phone=j.optString("phone"); p.memo=j.optString("memo");
+            if(j.has("minutes")){
+                Object value=j.get("minutes");
+                if(!(value instanceof Number))throw new JSONException("상담시간은 정수로 입력해 주세요.");
+                double number=((Number)value).doubleValue();
+                if(!Double.isFinite(number)||number!=Math.rint(number)||number<0||number>1440)throw new JSONException("상담시간은 0~1440 사이의 정수입니다.");
+                p.minutes=(int)number;
+            }
             p.today=j.optBoolean("today"); return p;
         }
     }
     final SharedPreferences prefs;
     final List<Place> places = new ArrayList<>();
     Place start, destination;
+    boolean recoveryRequired;
     int endMode=0; // 0 return, 1 last company, 2 custom
-    Data(Context c) { prefs=c.getSharedPreferences("plannerroute",Context.MODE_PRIVATE); }
-    void load() throws JSONException { String s=prefs.getString("data",null); if(s!=null) restore(new JSONObject(s)); }
+    Data(Context c) { this(c.getSharedPreferences("plannerroute",Context.MODE_PRIVATE)); }
+    Data(SharedPreferences prefs) { this.prefs=prefs; }
+    void load() throws JSONException {
+        String s=prefs.getString("data",null);if(s==null)return;
+        try {restore(new JSONObject(s));}
+        catch(JSONException e){recoveryRequired=true;throw e;}
+    }
     JSONObject json() throws JSONException {
         JSONArray a=new JSONArray(); for(Place p:places)a.put(p.json());
         return new JSONObject().put("version",1).put("companies",a).put("start",start==null?JSONObject.NULL:start.json())
@@ -46,9 +59,9 @@ final class Data {
         Place s=j.isNull("start")?null:Place.read(j.getJSONObject("start"));
         Place d=j.isNull("destination")?null:Place.read(j.getJSONObject("destination"));
         int mode=j.optInt("endMode",0); if(mode<0||mode>2)throw new JSONException("도착 방식이 올바르지 않습니다.");
-        places.clear(); places.addAll(incoming); start=s; destination=d; endMode=mode;
+        places.clear(); places.addAll(incoming); start=s; destination=d; endMode=mode; recoveryRequired=false;
     }
-    boolean save() { try{return prefs.edit().putString("data",json().toString()).commit();}catch(JSONException e){return false;} }
+    boolean save() { if(recoveryRequired)return false;try{return prefs.edit().putString("data",json().toString()).commit();}catch(JSONException e){return false;} }
     String endpoint(String kind) {
         return prefs.getString(kind,kind.equals("routing")?"https://router.project-osrm.org":kind.equals("search")?"https://photon.komoot.io":"https://tiles.openfreemap.org/styles/dark");
     }

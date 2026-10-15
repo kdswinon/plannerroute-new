@@ -57,6 +57,8 @@ Android Studio에서도 폴더를 열어 빌드할 수 있습니다. 디버그 A
 - `Data.java`: 업체 모델·저장·JSON 검증
 - `Routing.java`: 네트워크·캐시·방문 순서 계산·도로 경로
 
+[수정 내역·테스트 결과·Windows 실행 방법](VALIDATION.md)을 참고하세요. Windows용 `tests/windows-check.ps1`은 Android Studio가 준비된 PC에서 핵심 검사, 빌드, USB 설치와 실행 확인을 묶어 수행합니다. 화면/GPS 자동 검증이나 원격 PC 연결 기능은 아닙니다.
+
 ## 공식 참고 자료
 
 - [MapLibre Android](https://maplibre.org/maplibre-native/android/examples/getting-started/)
