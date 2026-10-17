@@ -137,9 +137,10 @@ public class MainActivity extends Activity {
             Button stop=button((i+1)+"  "+p.name+"  ·  "+leg(i),false,()->{
                 if(map!=null)map.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(p.lat,p.lon),15));
                 Rect bounds=new Rect();mapView.getDrawingRect(bounds);body.offsetDescendantRectToMyCoords(mapView,bounds);contentScroll.smoothScrollTo(0,Math.max(0,bounds.top));
-            });full(parent,stop);parent.addView(text(p.address,12,MUTED));
+            });full(parent,stop);parent.addView(text(p.address,12,MUTED));navigation(parent,p);
         }
         parent.addView(text(data.endMode==0?"도착 · 출발지로 복귀":data.endMode==1?"도착 · 마지막 업체에서 종료":"도착 · "+result.stops.get(result.stops.size()-1).name,14,WHITE));
+        if(data.endMode!=1)navigation(parent,result.stops.get(result.stops.size()-1));
     }
     String pinImage(String label,String kind){
         String id="planner-pin-"+kind+"-"+label;
@@ -246,7 +247,7 @@ public class MainActivity extends Activity {
         v.addView(text("OSRM 시간은 실시간 교통·국내 통행 제한을 모두 반영하지 않습니다. 실제 운전은 내비게이션 안내를 따르세요.",14,ORANGE));
         EditText route=input(v,"도로 서버 HTTPS 주소",data.endpoint("routing"),17),search=input(v,"보조 검색 서버 HTTPS 주소",data.endpoint("search"),17),style=input(v,"지도 스타일 HTTPS 주소",data.endpoint("style"),17);
         full(v,button("JSON 백업 · 가져오기",false,this::backup));full(v,button("지도 데이터 출처",false,()->openWeb("https://www.openstreetmap.org/copyright")));
-        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.5").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
+        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.6").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
         d.setOnShowListener(x->d.getButton(-1).setOnClickListener(w->{String[] values={route.getText().toString().trim(),search.getText().toString().trim(),style.getText().toString().trim()};for(String s:values){Uri u=Uri.parse(s);if(!"https".equals(u.getScheme())||u.getHost()==null||u.getUserInfo()!=null||u.getQuery()!=null||u.getFragment()!=null){toast("인증정보나 쿼리 없는 HTTPS 주소를 입력해 주세요.");return;}}
             data.prefs.edit().putString("routing",values[0].replaceAll("/+$","")).putString("search",values[1].replaceAll("/+$","")).putString("style",values[2]).apply();revision++;result=null;d.dismiss();loadStyle();render();}));d.show();
     }
