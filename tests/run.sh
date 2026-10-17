@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 set -eu
+# Shared workspace scanner needs group traversal/read on synthetic test artifacts.
+umask 027
 # Run from the repository root. Uses only project-local temporary files.
 PR_JAVA_HOME="${PR_JAVA_HOME:-$PWD/.tooling/jdk-17.0.20.1+1}"
 PR_ANDROID_JAR="${PR_ANDROID_JAR:-$PWD/.tooling/android-sdk/platforms/android-35/android.jar}"

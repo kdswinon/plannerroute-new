@@ -8,6 +8,7 @@ import java.lang.reflect.Proxy;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -89,5 +90,17 @@ public final class CoreChecks {
         System.out.printf(Locale.ROOT,"LIVE OSRM: %.1f km, %.1f driving min, %d consultation min, %d road points%n",r.meters/1000,r.seconds/60,r.consultation,r.geometry.getJSONArray("coordinates").length());
         check(!routing.search("Seoul").isEmpty(),"live Photon");
     }
-    public static void main(String[] args)throws Exception{Path work=Path.of(args.length>0?args[0]:".tooling/test-runtime");Files.createDirectories(work);data();optimize();network(Files.createTempDirectory(work,"http-"));if(Arrays.asList(args).contains("--live"))live(work.resolve("live"));System.out.println("PASS: "+checks+" core checks. Android UI/GPS/navigation not exercised.");}
+    static Path sharedTestDirectory(Path work)throws IOException {
+        // Synthetic HTTP fixtures only: allow the workspace's shared group to scan
+        // this directory from creation time. Windows keeps inherited ACLs.
+        if(Files.getFileStore(work).supportsFileAttributeView("posix")){
+            var permissions=PosixFilePermissions.fromString("rwxr-x---");
+            Path dir=Files.createTempDirectory(work,"http-",
+                PosixFilePermissions.asFileAttribute(permissions));
+            if(!Files.getPosixFilePermissions(dir).equals(permissions))Files.setPosixFilePermissions(dir,permissions);
+            return dir;
+        }
+        return Files.createTempDirectory(work,"http-");
+    }
+    public static void main(String[] args)throws Exception{Path work=Path.of(args.length>0?args[0]:".tooling/test-runtime");Files.createDirectories(work);data();optimize();network(sharedTestDirectory(work));if(Arrays.asList(args).contains("--live"))live(work.resolve("live"));System.out.println("PASS: "+checks+" core checks. Android UI/GPS/navigation not exercised.");}
 }
