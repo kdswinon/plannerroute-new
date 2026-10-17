@@ -31,6 +31,33 @@ final class Routing {
         } finally {c.disconnect();}
     }
     void trim(){File[] fs=cache.listFiles();if(fs==null||fs.length<=100)return;Arrays.sort(fs,Comparator.comparingLong(File::lastModified));for(int i=0;i<fs.length-100;i++)fs[i].delete();}
+    interface AddressLookup { List<Data.Place> search(String query) throws Exception; }
+    List<Data.Place> search(String query,AddressLookup device) throws Exception {
+        query=query.trim().replaceAll("\\s+"," ");
+        StringBuilder hash=new StringBuilder();
+        for(byte b:MessageDigest.getInstance("SHA-256").digest(query.getBytes(StandardCharsets.UTF_8)))hash.append(String.format(Locale.ROOT,"%02x",b&255));
+        File saved=new File(cache,"device-address-v1-"+hash+".json");
+        if(saved.exists()&&System.currentTimeMillis()-saved.lastModified()<30L*86400000){
+            try{JSONArray a=new JSONArray(new String(java.nio.file.Files.readAllBytes(saved.toPath()),StandardCharsets.UTF_8));
+                List<Data.Place> cached=new ArrayList<>();for(int i=0;i<a.length();i++)cached.add(Data.Place.read(a.getJSONObject(i)));
+                if(!cached.isEmpty())return cached;
+            }catch(Exception ignored){}
+        }
+        Exception primaryFailure=null;
+        try {
+            List<Data.Place> found=device.search(query);
+            if(found!=null&&!found.isEmpty()){
+                try{JSONArray a=new JSONArray();for(Data.Place p:found)a.put(p.json());java.nio.file.Files.write(saved.toPath(),a.toString().getBytes(StandardCharsets.UTF_8));trim();}catch(Exception ignored){}
+                return found;
+            }
+        }catch(InterruptedException e){Thread.currentThread().interrupt();throw e;}
+        catch(Exception e){if(Thread.currentThread().isInterrupted())throw e;primaryFailure=e;}
+        try {
+            List<Data.Place> fallback=search(query);
+            if(!fallback.isEmpty()||primaryFailure==null)return fallback;
+        }catch(Exception e){throw new IOException("주소 검색 서비스에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.",e);}
+        throw new IOException("휴대폰 주소 검색을 사용할 수 없고 보조 검색에서도 주소를 찾지 못했습니다. 네트워크를 확인해 주세요.",primaryFailure);
+    }
     List<Data.Place> search(String query) throws Exception {
         JSONObject j=get(data.endpoint("search")+"/api/?limit=5&q="+URLEncoder.encode(query,StandardCharsets.UTF_8.name()),30L*86400000);
         JSONArray features=j.getJSONArray("features");List<Data.Place> out=new ArrayList<>();

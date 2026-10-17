@@ -80,6 +80,14 @@ public final class CoreChecks {
             for(int mode=0;mode<3;mode++){Routing.Result r=routing.calculate(start,Arrays.asList(a,b),end,mode);check(r.stops.size()==(mode==1?3:4),"end mode stops");check(r.consultation==60,"consultation sum");check(r.legs.length()==r.stops.size()-1,"route leg count");check(r.geometry.getString("type").equals("LineString"),"GeoJSON route");check(r.seconds==120*r.legs.length(),"driving seconds not consultation");}
             int before=requests.get();routing.calculate(start,Arrays.asList(a,b),end,2);check(requests.get()==before,"same route/matrix cached");
             check(routing.search("확인용").size()==1,"search parsing");before=requests.get();routing.search("확인용");check(requests.get()==before,"search cached");
+            AtomicInteger deviceCalls=new AtomicInteger();
+            Routing.AddressLookup device=q->{deviceCalls.incrementAndGet();return Collections.singletonList(place("도로명주소 결과",37.5,126.9));};
+            before=requests.get();check(routing.search("  기기   주소  ",device).size()==1,"device geocoder result");
+            check(requests.get()==before,"device success avoids Photon");
+            routing.search("기기 주소",device);check(deviceCalls.get()==1,"normalized device result cached");
+            Routing reopened=new Routing(folder.toFile(),data);reopened.search("기기 주소",device);check(deviceCalls.get()==1,"device cache survives reopen");
+            check(routing.search("기기 실패",q->{throw new IOException("unavailable");}).size()==1,"device failure falls back to Photon");
+            check(routing.search("기기 빈결과",q->Collections.emptyList()).size()==1,"empty device result falls back to Photon");
             reject(()->routing.get(base+"/unavailable",1000),"503 surfaced");
             reject(()->routing.calculate(start,Collections.emptyList(),end,0),"empty selection");
         }finally{server.stop(0);}

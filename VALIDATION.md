@@ -1,3 +1,14 @@
+# 0.1.3 주소 검색 보완
+
+- 최종 0.1.3 APK 서버 빌드 BUILD SUCCESSFUL(코드 4).
+
+- 기존 Photon 단독 검색 대신 Android Geocoder(Locale.KOREA)를 우선 사용하고, 결과가 없거나 서비스가 실패하면 Photon으로 전환. Google Maps SDK/HTTP API 또는 Kakao Maps SDK는 추가하지 않음. 별도 키 입력 없음.
+- 기본 검색은 기기 제조사/시스템의 검색 제공자에 의존하며 국내 전체 주소 지원을 보장하지 않음. 사용자가 제시한 호곡공단로 11의 실제 Geocoder 결과는 서버에서 확인할 수 없음. 이 주소의 검색 성공을 검증 완료로 표시하지 않음.
+- 기본 검색 15초 대기 제한, 구형 기기 검색 스레드 최대 1개, 화면 종료 시 취소 처리. 보조 Photon 검색의 네트워크 대기는 별도임.
+- 기본 검색의 성공 결과만 30일 캐시, 좌표/검색주소/업체명 검증. 실패와 빈 결과는 기본 검색 캐시에 저장하지 않음. 반환 주소의 도로명·건물번호를 확인하고 선택하도록 안내.
+- 서버 자동 검사 389개 통과(실제 Routing/Data 대상, 기기 검색은 테스트 대역): 기본 검색 성공 시 보조 요청 방지, 공백 정규화, 재실행 캐시, 실패/빈 결과 보조 전환 포함. Android Geocoder 실제 응답·정확도 검사는 포함되지 않음.
+- 대안 검토: [Android 기본 Geocoder](https://developer.android.com/reference/android/location/Geocoder)는 기기 서비스 가용성과 정확도를 보장하지 않음. [Kakao Local 주소 좌표 API](https://developers.kakao.com/docs/en/local/dev-guide)는 REST API 키가 필요하므로 현재 키 없는 기본 구성에는 도입하지 않음.
+
 # 0.1.2 지도 가독성 개선
 
 - 앱의 다크 UI는 유지하고 기본 지도만 OpenFreeMap Liberty의 밝은 배경으로 변경. 기존 공식 Dark 설정도 밝은 스타일로 해석하며 별도 사용자 지정 스타일과 업체 저장자료는 보존.

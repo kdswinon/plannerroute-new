@@ -29,7 +29,7 @@ import static org.maplibre.android.style.layers.PropertyFactory.*;
 
 public class MainActivity extends Activity {
     final int BG=Color.rgb(11,12,15),CARD=Color.rgb(20,22,26),SECOND=Color.rgb(27,30,35),ORANGE=Color.rgb(255,149,0),WHITE=Color.rgb(245,246,248),MUTED=Color.rgb(153,160,173);
-    Data data; Routing routing; Routing.Result result;
+    Data data; Routing routing; Routing.Result result; AndroidAddressSearch addressSearch;
     final ExecutorService worker=Executors.newSingleThreadExecutor();
     final Handler handler=new Handler(Looper.getMainLooper());
     LinearLayout root,body,nav; MapView mapView; MapLibreMap map; Style mapStyle;
@@ -37,7 +37,7 @@ public class MainActivity extends Activity {
     int page=0,revision=0,pickMode=0; boolean busy=false; String status="",mapError="";
     LocationManager locations; LocationListener gpsListener; Runnable gpsTimeout;
     interface Action<T>{void accept(T value);}
-    @Override public void onCreate(Bundle saved){super.onCreate(saved);MapLibre.getInstance(this);data=new Data(this);routing=new Routing(this,data);
+    @Override public void onCreate(Bundle saved){super.onCreate(saved);MapLibre.getInstance(this);data=new Data(this);routing=new Routing(this,data);addressSearch=new AndroidAddressSearch(this);
         try{data.load();}catch(Exception e){status="저장된 데이터 형식을 읽지 못했습니다. 백업 파일을 가져와 주세요.";}
         mapView=new MapView(this);mapView.onCreate(saved);
         mapView.setOnTouchListener((v,event)->{if(v.getParent()!=null)v.getParent().requestDisallowInterceptTouchEvent(event.getActionMasked()!=MotionEvent.ACTION_UP&&event.getActionMasked()!=MotionEvent.ACTION_CANCEL);return false;});
@@ -108,7 +108,7 @@ public class MainActivity extends Activity {
     void mapPage(){if(pickMode!=0){LinearLayout c=card(body);c.addView(text((pickMode==1?"출발지":"도착지")+"로 사용할 위치를 지도에서 눌러 주세요.",16,ORANGE));full(c,button("선택 취소",false,()->{pickMode=0;render();}));}mapBlock(480);body.addView(text("지도를 길게 누르면 출발지·도착지 설정 또는 업체 등록이 가능합니다.",14,MUTED));if(result!=null)summary();}
     void mapBlock(int height){LinearLayout c=card(body);LinearLayout r=row();r.addView(heading("방문 동선 지도",17),new LinearLayout.LayoutParams(0,-2,1));r.addView(button("전체 보기",false,()->updateMap(true)));c.addView(r);
         if(!mapError.isEmpty()){c.addView(text(mapError,14,ORANGE));full(c,button("지도 다시 불러오기",false,this::loadStyle));}
-        c.addView(mapView,new LinearLayout.LayoutParams(-1,dp(height)));c.addView(text("● 출발   1–40 방문 순서   ● 도착\n© OpenFreeMap · OpenMapTiles · OpenStreetMap · 검색 Photon",11,MUTED));}
+        c.addView(mapView,new LinearLayout.LayoutParams(-1,dp(height)));c.addView(text("● 출발   1–40 방문 순서   ● 도착\n© OpenFreeMap · OpenMapTiles · OpenStreetMap · 검색 Android · Photon",11,MUTED));}
     void pick(int mode){pickMode=mode;page=2;render();}
     void changed(){revision++;result=null;status="";if(!data.save())status=data.recoveryRequired?"원본 저장자료를 보호하기 위해 저장을 중단했습니다. 정상 백업 파일을 가져와 주세요.":"저장 공간을 확인해 주세요. 이번 변경을 저장하지 못했습니다.";updateMap(false);}
     void optimize(){if(busy)return;if(data.start==null){toast("출발지를 먼저 선택해 주세요.");return;}if(data.endMode==2&&data.destination==null){toast("도착지를 먼저 선택해 주세요.");return;}
@@ -116,9 +116,9 @@ public class MainActivity extends Activity {
         final int token=revision,mode=data.endMode;Data.Place start=data.start,end=data.destination;busy=true;status="도로 이동시간을 비교하고 있습니다.";render();
         worker.execute(()->{try{Routing.Result r=routing.calculate(start,selected,end,mode);handler.post(()->{busy=false;if(token==revision){result=r;status="";render();updateMap(true);}else{status="조건이 바뀌었습니다. 동선을 다시 계산해 주세요.";render();}});}catch(Exception e){handler.post(()->{busy=false;if(token==revision){result=null;status="동선 계산 실패 · "+message(e);}render();});}});
     }
-    void search(Action<Data.Place> done){LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));EditText q=input(v,"주소 또는 장소명","",1);v.addView(text("검색 버튼을 눌러 조회합니다. 검색 결과가 없으면 지도에서 선택해 주세요.",13,MUTED));
+    void search(Action<Data.Place> done){LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));EditText q=input(v,"주소 또는 장소명","",1);v.addView(text("휴대폰 주소 검색을 우선 사용합니다. 결과의 도로명과 건물번호가 맞는지 확인해 주세요.",13,MUTED));
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("주소·장소 검색").setView(v).setNegativeButton("취소",null).setPositiveButton("검색",null).create();dialog.setOnShowListener(x->dialog.getButton(-1).setOnClickListener(x2->{String query=q.getText().toString().trim();if(query.length()<2){q.setError("두 글자 이상 입력해 주세요.");return;}Button b=dialog.getButton(-1);b.setEnabled(false);b.setText("검색 중…");
-            worker.execute(()->{try{List<Data.Place> found=routing.search(query);handler.post(()->{if(isFinishing()||isDestroyed()||!dialog.isShowing())return;b.setEnabled(true);b.setText("검색");if(found.isEmpty()){toast("검색 결과가 없습니다. 지도에서 위치를 선택할 수 있습니다.");return;}String[] names=found.stream().map(p->p.name+"\n"+p.address).toArray(String[]::new);new AlertDialog.Builder(this).setTitle("검색 결과 확인").setItems(names,(d,i)->{dialog.dismiss();done.accept(found.get(i));}).setNegativeButton("취소",null).show();});}catch(Exception e){handler.post(()->{if(isFinishing()||isDestroyed()||!dialog.isShowing())return;b.setEnabled(true);b.setText("검색");toast("검색 실패 · "+message(e));});}});
+            worker.execute(()->{try{List<Data.Place> found=routing.search(query,addressSearch::search);handler.post(()->{if(isFinishing()||isDestroyed()||!dialog.isShowing())return;b.setEnabled(true);b.setText("검색");if(found.isEmpty()){toast("검색 결과가 없습니다. 지도에서 위치를 선택할 수 있습니다.");return;}String[] names=found.stream().map(p->p.name+"\n"+p.address).toArray(String[]::new);new AlertDialog.Builder(this).setTitle("검색 주소 확인").setItems(names,(d,i)->{dialog.dismiss();done.accept(found.get(i));}).setNegativeButton("취소",null).show();});}catch(Exception e){handler.post(()->{if(isFinishing()||isDestroyed()||!dialog.isShowing())return;b.setEnabled(true);b.setText("검색");toast("검색 실패 · "+message(e));});}});
         }));dialog.show();}
     void editCompany(Data.Place old,Data.Place seed){if(data.recoveryRequired){toast("원본 보호를 위해 백업 파일을 먼저 복구해 주세요.");return;}if(old==null&&data.places.size()>=2000){toast("업체는 최대 2,000개 등록할 수 있습니다.");return;}LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));ScrollView scroll=new ScrollView(this);scroll.addView(v);Data.Place p=old!=null?old:seed;final Data.Place[] location={p};
         EditText name=input(v,"업체명",p==null?"":p.name,1);TextView address=text(p==null?"위치가 지정되지 않았습니다.":p.address,14,MUTED);v.addView(address);
@@ -187,9 +187,9 @@ public class MainActivity extends Activity {
     }
     void settings(){LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));v.addView(text("지도와 도로 계산에는 인터넷이 필요합니다. 업체·메모는 휴대폰 내부에 저장됩니다. 검색어는 검색 서버로, 경로 좌표는 도로 서버로 전달됩니다. 전화번호·메모는 전송하지 않습니다.",14,MUTED));
         v.addView(text("OSRM 시간은 실시간 교통·국내 통행 제한을 모두 반영하지 않습니다. 실제 운전은 내비게이션 안내를 따르세요.",14,ORANGE));
-        EditText route=input(v,"도로 서버 HTTPS 주소",data.endpoint("routing"),17),search=input(v,"장소 검색 서버 HTTPS 주소",data.endpoint("search"),17),style=input(v,"지도 스타일 HTTPS 주소",data.endpoint("style"),17);
+        EditText route=input(v,"도로 서버 HTTPS 주소",data.endpoint("routing"),17),search=input(v,"보조 검색 서버 HTTPS 주소",data.endpoint("search"),17),style=input(v,"지도 스타일 HTTPS 주소",data.endpoint("style"),17);
         full(v,button("JSON 백업 · 가져오기",false,this::backup));full(v,button("지도 데이터 출처",false,()->openWeb("https://www.openstreetmap.org/copyright")));
-        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.2").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
+        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.3").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
         d.setOnShowListener(x->d.getButton(-1).setOnClickListener(w->{String[] values={route.getText().toString().trim(),search.getText().toString().trim(),style.getText().toString().trim()};for(String s:values){Uri u=Uri.parse(s);if(!"https".equals(u.getScheme())||u.getHost()==null||u.getUserInfo()!=null||u.getQuery()!=null||u.getFragment()!=null){toast("인증정보나 쿼리 없는 HTTPS 주소를 입력해 주세요.");return;}}
             data.prefs.edit().putString("routing",values[0].replaceAll("/+$","")).putString("search",values[1].replaceAll("/+$","")).putString("style",values[2]).apply();revision++;result=null;d.dismiss();loadStyle();render();}));d.show();
     }
@@ -199,7 +199,7 @@ public class MainActivity extends Activity {
     @Override protected void onResume(){super.onResume();mapView.onResume();}
     @Override protected void onPause(){mapView.onPause();stopGps();super.onPause();}
     @Override protected void onStop(){mapView.onStop();super.onStop();}
-    @Override protected void onDestroy(){stopGps();worker.shutdownNow();mapView.onDestroy();super.onDestroy();}
+    @Override protected void onDestroy(){stopGps();worker.shutdownNow();if(addressSearch!=null)addressSearch.close();mapView.onDestroy();super.onDestroy();}
     @Override public void onLowMemory(){super.onLowMemory();mapView.onLowMemory();}
     @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);mapView.onSaveInstanceState(out);}
 }
