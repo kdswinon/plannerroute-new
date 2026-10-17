@@ -50,4 +50,4 @@ powershell -ExecutionPolicy Bypass -File .\tests\windows-check.ps1 -Live
 
 위 옵션은 해당 실행에만 적용하며 시스템 실행 정책을 바꾸지 않습니다. 스크립트는 핵심 검사 → APK 빌드 → 기기 1대 확인 → 데이터 유지 설치 → 실행 → 해당 앱 로그 수집을 수행합니다. 기존 앱의 서명이 다르면 제거하지 않고 중단합니다. 최초 빌드한 놀이터 APK와 Windows 개발 서명은 다를 수 있으므로, 서명 불일치를 기존 앱 삭제로 우회하지 않습니다. 화면과 GPS를 자동으로 모두 검증하는 스크립트는 아닙니다.
 
-기본 Android Studio/JDK/SDK 설치 경로가 다르면 `-JavaHome`, `-AndroidSdk`를 지정합니다. 앱 로그와 임시파일은 Git에 포함되지 않는 `.tooling/windows-check`에 보관합니다.
+스크립트는 프로젝트 내부 `.tooling/windows-jdk`에 Windows x64용 Temurin JDK 17을 자동 다운로드하고 공식 메타데이터의 SHA-256을 검증합니다. 압축 해제가 완료된 JDK만 재사용하며 시스템 Java 설정은 변경하지 않습니다. Android Studio 내장 Java 25에서는 Gradle 8.9가 `Unsupported class file major version 69`로 실패하므로 사용하지 않습니다. 별도 JDK를 지정하려면 JDK 17 경로를 `-JavaHome`으로, SDK 경로가 다르면 `-AndroidSdk`로 지정합니다. 테스트 컴파일은 UTF-8/Java 17로 고정하고 Gradle에도 동일한 JDK를 지정합니다. 2026-10-17 서버 Java 17에서 assembleDebug 재확인은 BUILD SUCCESSFUL(34개 작업 up-to-date)이었습니다. 수정한 Windows 스크립트의 실제 PC 실행은 아직 검증하지 않았습니다. 앱 로그와 임시파일은 Git에 포함되지 않는 `.tooling/windows-check`에 보관합니다.
