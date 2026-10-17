@@ -118,12 +118,26 @@ public class MainActivity extends Activity {
     }
     void search(Action<Data.Place> done){LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));EditText q=input(v,"주소 또는 장소명","",1);v.addView(text("휴대폰 주소 검색을 우선 사용합니다. 결과의 도로명과 건물번호가 맞는지 확인해 주세요.",13,MUTED));
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("주소·장소 검색").setView(v).setNegativeButton("취소",null).setPositiveButton("검색",null).create();dialog.setOnShowListener(x->dialog.getButton(-1).setOnClickListener(x2->{String query=q.getText().toString().trim();if(query.length()<2){q.setError("두 글자 이상 입력해 주세요.");return;}Button b=dialog.getButton(-1);b.setEnabled(false);b.setText("검색 중…");
-            worker.execute(()->{try{List<Data.Place> found=routing.search(query,addressSearch::search);handler.post(()->{if(isFinishing()||isDestroyed()||!dialog.isShowing())return;b.setEnabled(true);b.setText("검색");if(found.isEmpty()){toast("검색 결과가 없습니다. 지도에서 위치를 선택할 수 있습니다.");return;}String[] names=found.stream().map(p->p.name+"\n"+p.address).toArray(String[]::new);new AlertDialog.Builder(this).setTitle("검색 주소 확인").setItems(names,(d,i)->{dialog.dismiss();done.accept(found.get(i));}).setNegativeButton("취소",null).show();});}catch(Exception e){handler.post(()->{if(isFinishing()||isDestroyed()||!dialog.isShowing())return;b.setEnabled(true);b.setText("검색");toast("검색 실패 · "+message(e));});}});
+            worker.execute(()->{try{List<Data.Place> found=routing.search(query,addressSearch::search);handler.post(()->{if(isFinishing()||isDestroyed()||!dialog.isShowing())return;b.setEnabled(true);b.setText("검색");if(found.isEmpty()){toast("검색 결과가 없습니다. 지도에서 위치를 선택할 수 있습니다.");return;}dialog.dismiss();showAddressResults(found,done);});}catch(Exception e){handler.post(()->{if(isFinishing()||isDestroyed()||!dialog.isShowing())return;b.setEnabled(true);b.setText("검색");toast("검색 실패 · "+message(e));});}});
         }));dialog.show();}
+    void showAddressResults(List<Data.Place> found,Action<Data.Place> done){
+        if(found.isEmpty()||isFinishing()||isDestroyed())return;
+        final int[] selected={0};
+        String[] labels=found.stream().map(p->p.name.matches("[0-9-]+")?p.address:p.name+"\n"+p.address).toArray(String[]::new);
+        AlertDialog results=new AlertDialog.Builder(this).setTitle("사용할 주소를 선택하세요")
+            .setSingleChoiceItems(labels,0,(dialog,index)->selected[0]=index)
+            .setNegativeButton("취소",null).setPositiveButton("이 주소 사용",null).create();
+        results.setOnShowListener(ignored->results.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view->{
+            Data.Place chosen=found.get(selected[0]);
+            // Close the result window explicitly before updating the underlying editor.
+            results.dismiss();done.accept(chosen);
+        }));
+        results.show();
+    }
     void editCompany(Data.Place old,Data.Place seed){if(data.recoveryRequired){toast("원본 보호를 위해 백업 파일을 먼저 복구해 주세요.");return;}if(old==null&&data.places.size()>=2000){toast("업체는 최대 2,000개 등록할 수 있습니다.");return;}LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));ScrollView scroll=new ScrollView(this);scroll.addView(v);Data.Place p=old!=null?old:seed;final Data.Place[] location={p};
         EditText name=input(v,"업체명",p==null?"":p.name,1);TextView address=text(p==null?"위치가 지정되지 않았습니다.":p.address,14,MUTED);v.addView(address);
         EditText lat=input(v,"위도 (지도 좌표 직접 입력 가능)",p==null?"":Double.toString(p.lat),8194|4096),lon=input(v,"경도",p==null?"":Double.toString(p.lon),8194|4096);
-        full(v,button("주소·장소 검색",false,()->search(found->{location[0]=found;address.setText(found.address);lat.setText(Double.toString(found.lat));lon.setText(Double.toString(found.lon));if(name.getText().toString().trim().isEmpty())name.setText(found.name);})));
+        full(v,button("주소·장소 검색",false,()->search(found->{location[0]=found;address.setText(found.address);lat.setText(Double.toString(found.lat));lon.setText(Double.toString(found.lon));if(name.getText().toString().trim().isEmpty()&&!found.name.matches("[0-9-]+"))name.setText(found.name);})));
         full(v,button("검색한 좌표 적용",false,()->{if(location[0]!=null){lat.setText(Double.toString(location[0].lat));lon.setText(Double.toString(location[0].lon));}}));
         EditText phone=input(v,"전화번호",p==null?"":p.phone,3),minutes=input(v,"상담 예상시간 (분)",p==null?"20":Integer.toString(p.minutes),2),memo=input(v,"메모",p==null?"":p.memo,1);
         AlertDialog d=new AlertDialog.Builder(this).setTitle(old==null?"업체 등록":"업체 수정").setView(scroll).setNegativeButton("취소",null).setPositiveButton("저장",null).create();
@@ -189,7 +203,7 @@ public class MainActivity extends Activity {
         v.addView(text("OSRM 시간은 실시간 교통·국내 통행 제한을 모두 반영하지 않습니다. 실제 운전은 내비게이션 안내를 따르세요.",14,ORANGE));
         EditText route=input(v,"도로 서버 HTTPS 주소",data.endpoint("routing"),17),search=input(v,"보조 검색 서버 HTTPS 주소",data.endpoint("search"),17),style=input(v,"지도 스타일 HTTPS 주소",data.endpoint("style"),17);
         full(v,button("JSON 백업 · 가져오기",false,this::backup));full(v,button("지도 데이터 출처",false,()->openWeb("https://www.openstreetmap.org/copyright")));
-        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.3").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
+        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.4").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
         d.setOnShowListener(x->d.getButton(-1).setOnClickListener(w->{String[] values={route.getText().toString().trim(),search.getText().toString().trim(),style.getText().toString().trim()};for(String s:values){Uri u=Uri.parse(s);if(!"https".equals(u.getScheme())||u.getHost()==null||u.getUserInfo()!=null||u.getQuery()!=null||u.getFragment()!=null){toast("인증정보나 쿼리 없는 HTTPS 주소를 입력해 주세요.");return;}}
             data.prefs.edit().putString("routing",values[0].replaceAll("/+$","")).putString("search",values[1].replaceAll("/+$","")).putString("style",values[2]).apply();revision++;result=null;d.dismiss();loadStyle();render();}));d.show();
     }
