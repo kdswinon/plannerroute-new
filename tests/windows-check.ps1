@@ -52,8 +52,11 @@ $env:ANDROID_USER_HOME = "$PWD\.tooling\windows-android"
 $work = "$PWD\.tooling\windows-check"
 New-Item -ItemType Directory -Force "$work\classes-jdk17" | Out-Null
 $json = "$work\json-20240303.jar"
-if (-not (Test-Path $json)) {
-    Invoke-WebRequest -UseBasicParsing 'https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar' -OutFile $json
+$jsonHash = '3cf6cd6892e32e2b4c1c39e0f52f5248a2f5b37646fdfbb79a66b46b618414ed'
+if (-not (Test-Path $json) -or (Get-FileHash -LiteralPath $json -Algorithm SHA256).Hash -ne $jsonHash) {
+    Invoke-WebRequest -UseBasicParsing 'https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar' -OutFile "$json.part"
+    if ((Get-FileHash -LiteralPath "$json.part" -Algorithm SHA256).Hash -ne $jsonHash) { throw 'Test library download checksum mismatch. Retry the script.' }
+    Move-Item -LiteralPath "$json.part" -Destination $json -Force
 }
 $compileCp = "$json;$AndroidSdk\platforms\android-35\android.jar"
 & "$JavaHome\bin\javac.exe" -encoding UTF-8 --release 17 -cp $compileCp -d "$work\classes-jdk17" app/src/main/java/com/plannerroute/app/Data.java app/src/main/java/com/plannerroute/app/Routing.java tests/CoreChecks.java
