@@ -7,6 +7,10 @@ import android.content.*;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.location.*;
@@ -32,7 +36,8 @@ public class MainActivity extends Activity {
     Data data; Routing routing; Routing.Result result; AndroidAddressSearch addressSearch;
     final ExecutorService worker=Executors.newSingleThreadExecutor();
     final Handler handler=new Handler(Looper.getMainLooper());
-    LinearLayout root,body,nav; MapView mapView; MapLibreMap map; Style mapStyle;
+    LinearLayout root,body,nav,mapWarnings; MapView mapView; MapLibreMap map; Style mapStyle;
+    final Set<String> pinImages=new HashSet<>();
     ScrollView contentScroll; int renderedPage=-1;
     int page=0,revision=0,pickMode=0; boolean busy=false; String status="",mapError="";
     LocationManager locations; LocationListener gpsListener; Runnable gpsTimeout;
@@ -49,7 +54,7 @@ public class MainActivity extends Activity {
                 Data.Place p=new Data.Place(index==0?"출발지":index==1?"도착지":"새 업체",point.getLatitude(),point.getLongitude());p.address=String.format(Locale.KOREA,"%.5f, %.5f",p.lat,p.lon);
                 if(index==2)editCompany(null,p);else{if(index==0)data.start=p;else{data.destination=p;data.endMode=2;}changed();render();}}).show();return true;});loadStyle();});render();
     }
-    void loadStyle(){if(map==null)return;mapStyle=null;mapError="";try{map.setStyle(data.endpoint("style"),style->{mapStyle=style;mapError="";updateMap(true);});}catch(Exception e){mapError="지도 스타일 주소를 확인해 주세요.";render();}}
+    void loadStyle(){if(map==null)return;mapStyle=null;mapError="";try{map.setStyle(data.endpoint("style"),style->{mapStyle=style;pinImages.clear();localizeMap(style);showMapError("");mapView.post(()->updateMap(true));});}catch(Exception e){mapError="지도 스타일 주소를 확인해 주세요.";render();}}
     int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}
     GradientDrawable bg(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
     TextView text(String s,int size,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);t.setPadding(0,dp(4),0,dp(4));return t;}
@@ -87,7 +92,7 @@ public class MainActivity extends Activity {
         if(data.endMode==2){end.addView(text(data.destination==null?"도착지를 선택해 주세요.":data.destination.name+"\n"+data.destination.address,15,MUTED));LinearLayout er=row();weighted(er,button("장소 검색",false,()->search(p->{data.destination=p;changed();render();})));weighted(er,button("지도 선택",false,()->pick(2)));end.addView(er);}
         Button optimize=button(busy?"도로 이동시간을 계산하고 있어요…":"오늘 동선 최적화 →",true,this::optimize);optimize.setEnabled(!busy);full(body,optimize);
         body.addView(text("실시간 교통은 반영되지 않습니다. 주행 중 조작하지 마세요.",12,MUTED));
-        if(result!=null){summary();mapBlock(280);timeline();}else {LinearLayout info=card(body);info.addView(text("출발지 → 방문 업체 → 도착지\n최적화 후 지도와 방문 순서가 여기에 표시됩니다.",15,MUTED));}
+        if(result!=null){summary();mapBlock(380);timeline();}else {LinearLayout info=card(body);info.addView(text("출발지 → 방문 업체 → 도착지\n최적화 후 지도와 방문 순서가 여기에 표시됩니다.",15,MUTED));}
     }
     void summary(){LinearLayout c=card(body);c.addView(text("TODAY’S ROUTE",11,ORANGE));c.addView(heading(String.format(Locale.KOREA,"%d곳  ·  %.1f km",result.companies.size(),result.meters/1000),27));
         c.addView(text("운전 "+duration(result.seconds)+"  +  상담 "+duration(result.consultation*60),15,MUTED));c.addView(heading("총 예상 "+duration(result.seconds+result.consultation*60),20));
@@ -106,15 +111,54 @@ public class MainActivity extends Activity {
     }
     void statistics(){if(result!=null){summary();timeline();}else{LinearLayout c=card(body);c.addView(heading("오늘 동선을 먼저 계산해 주세요",20));c.addView(text("운전시간과 상담시간을 합친 하루 예상 소요시간을 보여드립니다.",15,MUTED));full(c,button("오늘 동선으로",true,()->{page=0;render();}));}LinearLayout c=card(body);c.addView(text("등록 업체 "+data.places.size()+"개\n오늘 선택 "+data.selected().size()+"개\n오늘 상담 합계 "+duration(data.selected().stream().mapToInt(p->p.minutes).sum()*60),16,WHITE));}
     void mapPage(){if(pickMode!=0){LinearLayout c=card(body);c.addView(text((pickMode==1?"출발지":"도착지")+"로 사용할 위치를 지도에서 눌러 주세요.",16,ORANGE));full(c,button("선택 취소",false,()->{pickMode=0;render();}));}mapBlock(480);body.addView(text("지도를 길게 누르면 출발지·도착지 설정 또는 업체 등록이 가능합니다.",14,MUTED));if(result!=null)summary();}
-    void mapBlock(int height){LinearLayout c=card(body);LinearLayout r=row();r.addView(heading("방문 동선 지도",17),new LinearLayout.LayoutParams(0,-2,1));r.addView(button("전체 보기",false,()->updateMap(true)));c.addView(r);
-        if(!mapError.isEmpty()){c.addView(text(mapError,14,ORANGE));full(c,button("지도 다시 불러오기",false,this::loadStyle));}
-        c.addView(mapView,new LinearLayout.LayoutParams(-1,dp(height)));c.addView(text("● 출발   1–40 방문 순서   ● 도착\n© OpenFreeMap · OpenMapTiles · OpenStreetMap · 검색 Android · Photon",11,MUTED));}
+    void mapBlock(int height){LinearLayout c=card(body);LinearLayout r=row();r.addView(heading("방문 동선 지도",17),new LinearLayout.LayoutParams(0,-2,1));r.addView(button("지도",false,this::chooseMap));r.addView(button("전체 보기",false,()->updateMap(true)));c.addView(r);
+        mapWarnings=column();c.addView(mapWarnings);showMapError(mapError);
+        c.addView(mapView,new LinearLayout.LayoutParams(-1,dp(height)));routeOrder(c);c.addView(text("● 출발   1–40 방문 순서   ● 도착\n© OpenFreeMap · OpenMapTiles · OpenStreetMap · 검색 Android · Photon",11,MUTED));}
+    void showMapError(String message){mapError=message;if(mapWarnings==null)return;mapWarnings.removeAllViews();
+        if(!message.isEmpty()){mapWarnings.addView(text(message,14,ORANGE));full(mapWarnings,button("지도 다시 불러오기",false,this::loadStyle));}}
+    void chooseMap(){new AlertDialog.Builder(this).setTitle("지도 표시 방식")
+        .setItems(new String[]{"단순 지도 · 방문 동선 중심","상세 지도 · 도로와 주변 정보"},(d,i)->{
+            data.prefs.edit().putString("style","https://tiles.openfreemap.org/styles/"+(i==0?"positron":"liberty")).apply();loadStyle();
+        }).setNegativeButton("취소",null).show();}
+    void localizeMap(Style style){
+        String url=data.endpoint("style");if(!url.equals("https://tiles.openfreemap.org/styles/liberty")&&!url.equals("https://tiles.openfreemap.org/styles/positron"))return;
+        for(Layer layer:style.getLayers())if(layer instanceof SymbolLayer){SymbolLayer labels=(SymbolLayer)layer;
+            PropertyValue<?> field=labels.getTextField();
+            if(field.isExpression()&&field.getExpression().toString().contains("\"name\""))
+                labels.setProperties(textField(Expression.coalesce(Expression.get("name:ko"),Expression.get("name"),Expression.get("name:nonlatin"),Expression.get("name:latin"))));
+        }
+    }
+    void routeOrder(LinearLayout parent){
+        if(result==null){parent.addView(text("최적화하면 방문 순서 번호가 표시됩니다.",13,MUTED));return;}
+        parent.addView(text("방문 순서 · 도로 이동시간 기준",14,ORANGE));
+        parent.addView(text("출발 · "+result.stops.get(0).name,14,WHITE));
+        for(int i=0;i<result.companies.size();i++){
+            final Data.Place p=result.companies.get(i);
+            Button stop=button((i+1)+"  "+p.name+"  ·  "+leg(i),false,()->{
+                if(map!=null)map.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(p.lat,p.lon),15));
+                Rect bounds=new Rect();mapView.getDrawingRect(bounds);body.offsetDescendantRectToMyCoords(mapView,bounds);contentScroll.smoothScrollTo(0,Math.max(0,bounds.top));
+            });full(parent,stop);parent.addView(text(p.address,12,MUTED));
+        }
+        parent.addView(text(data.endMode==0?"도착 · 출발지로 복귀":data.endMode==1?"도착 · 마지막 업체에서 종료":"도착 · "+result.stops.get(result.stops.size()-1).name,14,WHITE));
+    }
+    String pinImage(String label,String kind){
+        String id="planner-pin-"+kind+"-"+label;
+        if(!pinImages.contains(id)){
+            Bitmap image=Bitmap.createBitmap(80,80,Bitmap.Config.ARGB_8888);
+            Canvas canvas=new Canvas(image);Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+            paint.setColor(Color.WHITE);canvas.drawCircle(40,40,39,paint);
+            paint.setColor(kind.equals("start")?Color.rgb(24,137,65):kind.equals("end")?Color.rgb(0,102,180):ORANGE);canvas.drawCircle(40,40,35,paint);
+            paint.setColor(kind.equals("stop")?BG:Color.WHITE);paint.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));paint.setTextAlign(Paint.Align.CENTER);paint.setTextSize(label.length()>2?24:30);
+            canvas.drawText(label,40,40-(paint.ascent()+paint.descent())/2,paint);
+            mapStyle.addImage(id,image);pinImages.add(id);
+        }return id;
+    }
     void pick(int mode){pickMode=mode;page=2;render();}
     void changed(){revision++;result=null;status="";if(!data.save())status=data.recoveryRequired?"원본 저장자료를 보호하기 위해 저장을 중단했습니다. 정상 백업 파일을 가져와 주세요.":"저장 공간을 확인해 주세요. 이번 변경을 저장하지 못했습니다.";updateMap(false);}
     void optimize(){if(busy)return;if(data.start==null){toast("출발지를 먼저 선택해 주세요.");return;}if(data.endMode==2&&data.destination==null){toast("도착지를 먼저 선택해 주세요.");return;}
         List<Data.Place> selected=data.selected();if(selected.isEmpty()||selected.size()>40){toast("업체를 1~40개 선택해 주세요.");return;}
         final int token=revision,mode=data.endMode;Data.Place start=data.start,end=data.destination;busy=true;status="도로 이동시간을 비교하고 있습니다.";render();
-        worker.execute(()->{try{Routing.Result r=routing.calculate(start,selected,end,mode);handler.post(()->{busy=false;if(token==revision){result=r;status="";render();updateMap(true);}else{status="조건이 바뀌었습니다. 동선을 다시 계산해 주세요.";render();}});}catch(Exception e){handler.post(()->{busy=false;if(token==revision){result=null;status="동선 계산 실패 · "+message(e);}render();});}});
+        worker.execute(()->{try{Routing.Result r=routing.calculate(start,selected,end,mode);handler.post(()->{busy=false;if(token==revision){result=r;status="";render();mapView.post(()->updateMap(true));}else{status="조건이 바뀌었습니다. 동선을 다시 계산해 주세요.";render();}});}catch(Exception e){handler.post(()->{busy=false;if(token==revision){result=null;status="동선 계산 실패 · "+message(e);}render();});}});
     }
     void search(Action<Data.Place> done){LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));EditText q=input(v,"주소 또는 장소명","",1);v.addView(text("휴대폰 주소 검색을 우선 사용합니다. 결과의 도로명과 건물번호가 맞는지 확인해 주세요.",13,MUTED));
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("주소·장소 검색").setView(v).setNegativeButton("취소",null).setPositiveButton("검색",null).create();dialog.setOnShowListener(x->dialog.getButton(-1).setOnClickListener(x2->{String query=q.getText().toString().trim();if(query.length()<2){q.setError("두 글자 이상 입력해 주세요.");return;}Button b=dialog.getButton(-1);b.setEnabled(false);b.setText("검색 중…");
@@ -168,22 +212,21 @@ public class MainActivity extends Activity {
         JSONArray features=new JSONArray();List<Data.Place> points=new ArrayList<>();
         if(data.start!=null){points.add(data.start);features.put(feature(data.start,result!=null&&data.endMode==0?"출·도":"출발","start"));}
         List<Data.Place> chosen=result==null?data.selected():result.companies;
-        for(int i=0;i<chosen.size();i++){Data.Place p=chosen.get(i);points.add(p);boolean last=result!=null&&data.endMode==1&&i==chosen.size()-1;features.put(feature(p,result==null?"·":Integer.toString(i+1)+(last?"·끝":""),last?"end":"stop"));}
+        for(int i=0;i<chosen.size();i++){Data.Place p=chosen.get(i);points.add(p);boolean last=result!=null&&data.endMode==1&&i==chosen.size()-1;features.put(feature(p,result==null?"·":Integer.toString(i+1),last?"end":"stop"));}
         if(result!=null){
             if(data.endMode==2&&data.destination!=null){points.add(data.destination);features.put(feature(data.destination,"도착","end"));}
         }else if(data.endMode==2&&data.destination!=null){points.add(data.destination);features.put(feature(data.destination,"도착","end"));}
         JSONObject collection=new JSONObject().put("type","FeatureCollection").put("features",features);
         GeoJsonSource source=mapStyle.getSourceAs("stops");if(source==null){source=new GeoJsonSource("stops",collection.toString());mapStyle.addSource(source);
-            mapStyle.addLayer(new CircleLayer("stops-circles","stops").withProperties(circleRadius(Expression.match(Expression.get("kind"),Expression.literal(17),Expression.stop("start",24),Expression.stop("end",24))),circleColor(Expression.match(Expression.get("kind"),Expression.literal("#FF9500"),Expression.stop("start","#34C759"),Expression.stop("end","#64D2FF"))),circleStrokeWidth(3f),circleStrokeColor("#14161A")));
-            mapStyle.addLayer(new SymbolLayer("stops-labels","stops").withProperties(textField(Expression.get("label")),textSize(13f),textColor("#0B0C0F"),textAllowOverlap(true),textIgnorePlacement(true)));
+            mapStyle.addLayer(new SymbolLayer("stops-circles","stops").withProperties(iconImage(Expression.get("pin")),iconSize(.65f),iconAllowOverlap(true),iconIgnorePlacement(true)));
         }else source.setGeoJson(collection.toString());
         JSONObject geometry=result==null?new JSONObject().put("type","FeatureCollection").put("features",new JSONArray()):new JSONObject().put("type","Feature").put("properties",new JSONObject()).put("geometry",result.geometry);
-        GeoJsonSource roads=mapStyle.getSourceAs("roads");if(roads==null){roads=new GeoJsonSource("roads",geometry.toString());mapStyle.addSource(roads);mapStyle.addLayerBelow(new LineLayer("route-halo","roads").withProperties(lineColor("#14161A"),lineWidth(10f),lineOpacity(.9f),lineJoin("round"),lineCap("round")),"stops-circles");mapStyle.addLayerBelow(new LineLayer("route-line","roads").withProperties(lineColor("#FF9500"),lineWidth(6f),lineJoin("round"),lineCap("round")),"stops-circles");}else roads.setGeoJson(geometry.toString());
+        GeoJsonSource roads=mapStyle.getSourceAs("roads");if(roads==null){roads=new GeoJsonSource("roads",geometry.toString());mapStyle.addSource(roads);mapStyle.addLayerBelow(new LineLayer("route-halo","roads").withProperties(lineColor("#FFFFFF"),lineWidth(7f),lineOpacity(.95f),lineJoin("round"),lineCap("round")),"stops-circles");mapStyle.addLayerBelow(new LineLayer("route-line","roads").withProperties(lineColor("#FF9500"),lineWidth(4f),lineJoin("round"),lineCap("round")),"stops-circles");}else roads.setGeoJson(geometry.toString());
         if(fit&&!points.isEmpty()){LatLngBounds.Builder bounds=new LatLngBounds.Builder();Set<String> distinct=new HashSet<>();for(Data.Place p:points){bounds.include(new LatLng(p.lat,p.lon));distinct.add(p.lat+","+p.lon);}
             if(result!=null){JSONArray coords=result.geometry.getJSONArray("coordinates");for(int i=0;i<coords.length();i++){JSONArray a=coords.getJSONArray(i);bounds.include(new LatLng(a.getDouble(1),a.getDouble(0)));distinct.add(a.toString());}}
             if(distinct.size()<2)map.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(points.get(0).lat,points.get(0).lon),14));else map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(),dp(40)));}
-    }catch(Exception e){mapError="지도 표시를 갱신하지 못했습니다. 다시 불러와 주세요.";}}
-    JSONObject feature(Data.Place p,String label,String kind)throws JSONException{return new JSONObject().put("type","Feature").put("properties",new JSONObject().put("label",label).put("kind",kind)).put("geometry",new JSONObject().put("type","Point").put("coordinates",new JSONArray().put(p.lon).put(p.lat)));}
+    }catch(Exception e){showMapError("지도 표시를 갱신하지 못했습니다. 다시 불러와 주세요.");}}
+    JSONObject feature(Data.Place p,String label,String kind)throws JSONException{return new JSONObject().put("type","Feature").put("properties",new JSONObject().put("label",label).put("kind",kind).put("pin",pinImage(label,kind))).put("geometry",new JSONObject().put("type","Point").put("coordinates",new JSONArray().put(p.lon).put(p.lat)));}
     void navigate(String kind,Data.Place p){String name=Uri.encode(p.name),scheme,web;
         if(kind.equals("TMAP")){scheme="tmap://route?goalx="+p.lon+"&goaly="+p.lat+"&goalname="+name;web="https://www.tmap.co.kr/";}
         else if(kind.equals("카카오맵")){scheme="kakaomap://route?ep="+p.lat+","+p.lon+"&by=CAR";web="https://map.kakao.com/link/to/"+name+","+p.lat+","+p.lon;}
@@ -203,7 +246,7 @@ public class MainActivity extends Activity {
         v.addView(text("OSRM 시간은 실시간 교통·국내 통행 제한을 모두 반영하지 않습니다. 실제 운전은 내비게이션 안내를 따르세요.",14,ORANGE));
         EditText route=input(v,"도로 서버 HTTPS 주소",data.endpoint("routing"),17),search=input(v,"보조 검색 서버 HTTPS 주소",data.endpoint("search"),17),style=input(v,"지도 스타일 HTTPS 주소",data.endpoint("style"),17);
         full(v,button("JSON 백업 · 가져오기",false,this::backup));full(v,button("지도 데이터 출처",false,()->openWeb("https://www.openstreetmap.org/copyright")));
-        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.4").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
+        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.5").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
         d.setOnShowListener(x->d.getButton(-1).setOnClickListener(w->{String[] values={route.getText().toString().trim(),search.getText().toString().trim(),style.getText().toString().trim()};for(String s:values){Uri u=Uri.parse(s);if(!"https".equals(u.getScheme())||u.getHost()==null||u.getUserInfo()!=null||u.getQuery()!=null||u.getFragment()!=null){toast("인증정보나 쿼리 없는 HTTPS 주소를 입력해 주세요.");return;}}
             data.prefs.edit().putString("routing",values[0].replaceAll("/+$","")).putString("search",values[1].replaceAll("/+$","")).putString("style",values[2]).apply();revision++;result=null;d.dismiss();loadStyle();render();}));d.show();
     }
