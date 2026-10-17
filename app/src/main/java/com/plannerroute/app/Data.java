@@ -63,7 +63,11 @@ final class Data {
     }
     boolean save() { if(recoveryRequired)return false;try{return prefs.edit().putString("data",json().toString()).commit();}catch(JSONException e){return false;} }
     String endpoint(String kind) {
-        return prefs.getString(kind,kind.equals("routing")?"https://router.project-osrm.org":kind.equals("search")?"https://photon.komoot.io":"https://tiles.openfreemap.org/styles/dark");
+        String value=prefs.getString(kind,kind.equals("routing")?"https://router.project-osrm.org":kind.equals("search")?"https://photon.komoot.io":"https://tiles.openfreemap.org/styles/liberty");
+        // Upgrade the old bundled map style without touching saved companies or custom providers.
+        if(kind.equals("style")&&"https://tiles.openfreemap.org/styles/dark".equals(value))
+            return "https://tiles.openfreemap.org/styles/liberty";
+        return value;
     }
     List<Place> selected() { List<Place> a=new ArrayList<>(); for(Place p:places)if(p.today)a.add(p); return a; }
 }
