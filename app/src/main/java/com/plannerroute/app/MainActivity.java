@@ -40,7 +40,7 @@ public class MainActivity extends Activity {
     final Set<String> pinImages=new HashSet<>();
     ScrollView contentScroll; int renderedPage=-1;
     int page=0,revision=0,pickMode=0; boolean busy=false; String status="",mapError="";
-    LocationManager locations; LocationListener gpsListener; Runnable gpsTimeout;
+    LocationManager locations; LocationListener gpsListener; Runnable gpsTimeout; Action<Data.Place> pendingLocation;
     interface Action<T>{void accept(T value);}
     @Override public void onCreate(Bundle saved){super.onCreate(saved);MapLibre.getInstance(this);data=new Data(this);routing=new Routing(this,data);addressSearch=new AndroidAddressSearch(this);
         try{data.load();}catch(Exception e){status="저장된 데이터 형식을 읽지 못했습니다. 백업 파일을 가져와 주세요.";}
@@ -200,15 +200,37 @@ public class MainActivity extends Activity {
             if(old!=null)data.places.set(data.places.indexOf(old),value);else data.places.add(value);changed();d.dismiss();render();
         }catch(Exception e){toast(e instanceof NumberFormatException?"좌표와 상담시간을 숫자로 입력해 주세요.":message(e));}}));d.show();
     }
-    void gps(){if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED&&checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION},7);return;}stopGps();
-        locations=(LocationManager)getSystemService(LOCATION_SERVICE);boolean precise=checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
-        List<String> enabled=locations.getProviders(true);String provider=precise&&enabled.contains(LocationManager.GPS_PROVIDER)?LocationManager.GPS_PROVIDER:enabled.contains(LocationManager.NETWORK_PROVIDER)?LocationManager.NETWORK_PROVIDER:null;
-        if(provider==null){toast(precise?"휴대폰 설정에서 위치 서비스를 켜 주세요.":"대략적 위치를 확인할 수 없습니다. 정확한 위치를 허용하거나 지도를 선택해 주세요.");return;}toast("현재 위치를 확인하고 있습니다…");
-        gpsListener=new LocationListener(){public void onLocationChanged(Location l){if(System.currentTimeMillis()-l.getTime()>120000)return;stopGps();Data.Place p=new Data.Place("현재 위치",l.getLatitude(),l.getLongitude());p.address="GPS · 정확도 약 "+Math.round(l.getAccuracy())+"m";data.start=p;changed();render();}public void onProviderEnabled(String s){}public void onProviderDisabled(String s){}public void onStatusChanged(String s,int n,Bundle b){}};
-        try{locations.requestLocationUpdates(provider,1000,0,gpsListener,Looper.getMainLooper());gpsTimeout=()->{stopGps();toast("위치를 확인하지 못했습니다. 장소 검색이나 지도 선택을 이용해 주세요.");};handler.postDelayed(gpsTimeout,25000);}catch(SecurityException e){stopGps();toast("위치 권한을 허용해 주세요.");}
+    void gps(){requestCurrentLocation(p->{data.start=p;changed();render();});}
+    void requestCurrentLocation(Action<Data.Place> done){
+        if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED&&checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED){
+            pendingLocation=done;requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION},7);return;
+        }
+        pendingLocation=null;stopGps();locations=(LocationManager)getSystemService(LOCATION_SERVICE);
+        boolean precise=checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+        List<String> enabled=locations.getProviders(true),providers=new ArrayList<>();
+        if(precise&&enabled.contains(LocationManager.GPS_PROVIDER))providers.add(LocationManager.GPS_PROVIDER);
+        if(enabled.contains(LocationManager.NETWORK_PROVIDER))providers.add(LocationManager.NETWORK_PROVIDER);
+        if(providers.isEmpty()){toast("휴대폰 위치 서비스를 켠 뒤 다시 눌러 주세요.");return;}
+        toast("현재 위치를 확인하고 있습니다…");
+        gpsListener=new LocationListener(){public void onLocationChanged(Location l){
+            if(gpsListener!=this)return;
+            long age=SystemClock.elapsedRealtimeNanos()-l.getElapsedRealtimeNanos();
+            if(age<0||age>60_000_000_000L||!l.hasAccuracy()||l.getAccuracy()>500||!Double.isFinite(l.getLatitude())||!Double.isFinite(l.getLongitude())||Math.abs(l.getLatitude())>85||Math.abs(l.getLongitude())>180)return;
+            stopGps();Data.Place current=new Data.Place("현재 위치",l.getLatitude(),l.getLongitude());current.address="현재 위치 · 정확도 약 "+Math.round(l.getAccuracy())+"m";
+            done.accept(current);
+        }public void onProviderEnabled(String s){}public void onProviderDisabled(String s){}public void onStatusChanged(String s,int n,Bundle b){}};
+        boolean registered=false;
+        for(String provider:providers)try{locations.requestLocationUpdates(provider,1000,0,gpsListener,Looper.getMainLooper());registered=true;}catch(SecurityException|IllegalArgumentException ignored){}
+        if(!registered){stopGps();toast("위치 권한과 휴대폰 위치 설정을 확인해 주세요.");return;}
+        gpsTimeout=()->{stopGps();toast("현재 위치를 확인하지 못했습니다. 정확한 위치 권한과 GPS를 확인한 뒤 다시 눌러 주세요.");};handler.postDelayed(gpsTimeout,25000);
     }
-    void stopGps(){if(locations!=null&&gpsListener!=null)locations.removeUpdates(gpsListener);gpsListener=null;if(gpsTimeout!=null)handler.removeCallbacks(gpsTimeout);gpsTimeout=null;}
-    @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] grants){super.onRequestPermissionsResult(code,permissions,grants);if(code==7){if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED)gps();else toast("위치 권한 없이도 검색·지도 선택을 사용할 수 있습니다.");}}
+    void stopGps(){if(locations!=null&&gpsListener!=null)try{locations.removeUpdates(gpsListener);}catch(SecurityException ignored){}gpsListener=null;if(gpsTimeout!=null)handler.removeCallbacks(gpsTimeout);gpsTimeout=null;}
+    @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] grants){
+        super.onRequestPermissionsResult(code,permissions,grants);if(code!=7)return;
+        Action<Data.Place> done=pendingLocation;pendingLocation=null;
+        if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED||checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED){if(done!=null)requestCurrentLocation(done);else toast("위치 권한이 허용되었습니다. 원하시는 버튼을 다시 눌러 주세요.");}
+        else toast("현재 위치를 출발지로 전달하려면 위치 권한이 필요합니다.");
+    }
     void updateMap(boolean fit){if(mapStyle==null||map==null)return;try{
         JSONArray features=new JSONArray();List<Data.Place> points=new ArrayList<>();
         if(data.start!=null){points.add(data.start);features.put(feature(data.start,result!=null&&data.endMode==0?"출·도":"출발","start"));}
@@ -228,11 +250,17 @@ public class MainActivity extends Activity {
             if(distinct.size()<2)map.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(points.get(0).lat,points.get(0).lon),14));else map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(),dp(40)));}
     }catch(Exception e){showMapError("지도 표시를 갱신하지 못했습니다. 다시 불러와 주세요.");}}
     JSONObject feature(Data.Place p,String label,String kind)throws JSONException{return new JSONObject().put("type","Feature").put("properties",new JSONObject().put("label",label).put("kind",kind).put("pin",pinImage(label,kind))).put("geometry",new JSONObject().put("type","Point").put("coordinates",new JSONArray().put(p.lon).put(p.lat)));}
-    void navigate(String kind,Data.Place p){String name=Uri.encode(p.name),scheme,web;
+    void navigate(String kind,Data.Place p){
+        if(kind.equals("카카오맵")){requestCurrentLocation(start->openKakao(start,p));return;}
+        String name=Uri.encode(p.name),scheme,web;
         if(kind.equals("TMAP")){scheme="tmap://route?goalx="+p.lon+"&goaly="+p.lat+"&goalname="+name;web="https://www.tmap.co.kr/";}
-        else if(kind.equals("카카오맵")){scheme="kakaomap://route?ep="+p.lat+","+p.lon+"&by=CAR";web="https://map.kakao.com/link/to/"+name+","+p.lat+","+p.lon;}
         else{scheme="nmap://navigation?dlat="+p.lat+"&dlng="+p.lon+"&dname="+name+"&appname="+getPackageName();web="https://map.naver.com/p/search/"+Uri.encode(p.name+" "+p.address);}
         try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(scheme)));}catch(ActivityNotFoundException e){if(kind.equals("TMAP"))new AlertDialog.Builder(this).setTitle("TMAP이 설치되어 있지 않습니다").setMessage("TMAP은 웹에서 차량 안내를 제공하지 않습니다. 설치 페이지를 열거나 카카오맵 웹 길찾기를 이용해 주세요.").setNegativeButton("취소",null).setNeutralButton("웹 길찾기",(d,w)->openWeb("https://map.kakao.com/link/to/"+name+","+p.lat+","+p.lon)).setPositiveButton("TMAP 설치",(d,w)->openWeb("https://play.google.com/store/apps/details?id=com.skt.tmap.ku")).show();else openWeb(web);}
+    }
+    void openKakao(Data.Place start,Data.Place destination){
+        String query="sp="+start.lat+","+start.lon+"&ep="+destination.lat+","+destination.lon+"&by=car";
+        try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("kakaomap://route?"+query)));}
+        catch(ActivityNotFoundException e){openWeb("https://m.map.kakao.com/scheme/route?"+query);}
     }
     void openWeb(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException e){toast("링크를 열 브라우저가 없습니다.");}}
     void backup(){new AlertDialog.Builder(this).setTitle("업체 데이터 백업").setItems(new String[]{"JSON 내보내기","JSON 가져오기"},(d,i)->{try{Intent intent=new Intent(i==0?Intent.ACTION_CREATE_DOCUMENT:Intent.ACTION_OPEN_DOCUMENT);intent.setType("application/json");intent.addCategory(Intent.CATEGORY_OPENABLE);if(i==0)intent.putExtra(Intent.EXTRA_TITLE,"plannerroute-backup.json");startActivityForResult(intent,i==0?21:22);}catch(ActivityNotFoundException e){toast("휴대폰의 파일 앱을 활성화해 주세요.");}}).show();}
@@ -247,7 +275,7 @@ public class MainActivity extends Activity {
         v.addView(text("OSRM 시간은 실시간 교통·국내 통행 제한을 모두 반영하지 않습니다. 실제 운전은 내비게이션 안내를 따르세요.",14,ORANGE));
         EditText route=input(v,"도로 서버 HTTPS 주소",data.endpoint("routing"),17),search=input(v,"보조 검색 서버 HTTPS 주소",data.endpoint("search"),17),style=input(v,"지도 스타일 HTTPS 주소",data.endpoint("style"),17);
         full(v,button("JSON 백업 · 가져오기",false,this::backup));full(v,button("지도 데이터 출처",false,()->openWeb("https://www.openstreetmap.org/copyright")));
-        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.6").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
+        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.7").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
         d.setOnShowListener(x->d.getButton(-1).setOnClickListener(w->{String[] values={route.getText().toString().trim(),search.getText().toString().trim(),style.getText().toString().trim()};for(String s:values){Uri u=Uri.parse(s);if(!"https".equals(u.getScheme())||u.getHost()==null||u.getUserInfo()!=null||u.getQuery()!=null||u.getFragment()!=null){toast("인증정보나 쿼리 없는 HTTPS 주소를 입력해 주세요.");return;}}
             data.prefs.edit().putString("routing",values[0].replaceAll("/+$","")).putString("search",values[1].replaceAll("/+$","")).putString("style",values[2]).apply();revision++;result=null;d.dismiss();loadStyle();render();}));d.show();
     }
