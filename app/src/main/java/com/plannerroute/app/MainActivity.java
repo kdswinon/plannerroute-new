@@ -96,7 +96,62 @@ public class MainActivity extends Activity {
     }
     void summary(){LinearLayout c=card(body);c.addView(text("TODAY’S ROUTE",11,ORANGE));c.addView(heading(String.format(Locale.KOREA,"%d곳  ·  %.1f km",result.companies.size(),result.meters/1000),27));
         c.addView(text("운전 "+duration(result.seconds)+"  +  상담 "+duration(result.consultation*60),15,MUTED));c.addView(heading("총 예상 "+duration(result.seconds+result.consultation*60),20));
-        c.addView(text(result.exact?"도로 시간 행렬 기준 최적 순서 · 실시간 교통 미반영":"많은 방문지를 위한 근사 최적화 · 실시간 교통 미반영",12,MUTED));}
+        c.addView(text(result.exact?"도로 시간 행렬 기준 최적 순서 · 실시간 교통 미반영":"많은 방문지를 위한 근사 최적화 · 실시간 교통 미반영",12,MUTED));
+        full(c,button("카카오맵 · 경유지로 보내기",true,this::chooseRouteStops));
+        c.addView(text("방문지를 선택하면 최적화 순서대로 최대 6곳씩 나눠 보냅니다.",12,MUTED));}
+    void chooseRouteStops(){
+        final Routing.Result plan=result;
+        final int token=revision;
+        if(plan==null||plan.stops.size()<2){toast("동선을 먼저 최적화해 주세요.");return;}
+        final List<Data.Place> stops=new ArrayList<>(plan.stops.subList(1,plan.stops.size()));
+        final String[] labels=new String[stops.size()];
+        final boolean[] checked=new boolean[stops.size()];
+        for(int i=0;i<stops.size();i++){
+            labels[i]=(i<plan.companies.size()?(i+1)+"  ":"도착 · ")+stops.get(i).name;
+            checked[i]=true;
+        }
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("카카오맵으로 보낼 방문지")
+            .setMultiChoiceItems(labels,checked,(d,i,on)->checked[i]=on)
+            .setNegativeButton("취소",null).setPositiveButton("선택한 순서 확인",null).create();
+        dialog.setOnShowListener(ignored->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            if(result!=plan||revision!=token){dialog.dismiss();toast("동선이 바뀌었습니다. 다시 선택해 주세요.");return;}
+            List<Data.Place> chosen=new ArrayList<>();List<String> names=new ArrayList<>();
+            for(int i=0;i<stops.size();i++)if(checked[i]){chosen.add(stops.get(i));names.add(labels[i]);}
+            if(chosen.isEmpty()){toast("방문지를 한 곳 이상 선택해 주세요.");return;}
+            dialog.dismiss();showRouteBatches(plan,token,chosen,names);
+        }));
+        dialog.show();
+    }
+    void showRouteBatches(Routing.Result plan,int token,List<Data.Place> stops,List<String> names){
+        if(result!=plan||revision!=token){toast("동선이 바뀌었습니다. 다시 선택해 주세요.");return;}
+        int count=(stops.size()+5)/6;
+        String[] labels=new String[count];
+        for(int i=0;i<count;i++){
+            int from=i*6,to=Math.min(from+6,stops.size());
+            labels[i]=(i+1)+"구간 · "+names.get(from)+" → "+names.get(to-1)+" ("+(to-from)+"곳)";
+        }
+        new AlertDialog.Builder(this).setTitle("보낼 구간 선택 · 최대 6곳씩")
+            .setItems(labels,(d,i)->confirmRouteBatch(plan,token,stops,names,i*6))
+            .setNegativeButton("닫기",null).show();
+    }
+    void confirmRouteBatch(Routing.Result plan,int token,List<Data.Place> stops,List<String> names,int from){
+        int to=Math.min(from+6,stops.size());
+        final List<Data.Place> batch=new ArrayList<>(stops.subList(from,to));
+        StringBuilder details=new StringBuilder("출발 · 현재 위치\n");
+        for(int i=from;i<to;i++)details.append(i==to-1?"목적지 · ":"경유 · ").append(names.get(i)).append("\n");
+        details.append("\n최적화 순서대로 경유지 최대 5곳과 목적지 1곳을 전달합니다. 좌표가 카카오맵에 전달됩니다.");
+        if(to<stops.size())details.append("\n이 구간 방문 후 루트플래너로 돌아와 다음 구간을 선택해 주세요.");
+        details.append("\n전송만으로 방문 완료 처리하지 않습니다. 카카오맵에서 방문 순서를 확인해 주세요.");
+        new AlertDialog.Builder(this).setTitle((from/6+1)+"구간 보내기").setMessage(details.toString())
+            .setNegativeButton("뒤로",(d,w)->showRouteBatches(plan,token,stops,names))
+            .setPositiveButton("현재 위치에서 길찾기",(d,w)->{
+                if(result!=plan||revision!=token){toast("동선이 바뀌었습니다. 다시 선택해 주세요.");return;}
+                requestCurrentLocation(start->{
+                    if(result!=plan||revision!=token){toast("동선이 바뀌었습니다. 다시 선택해 주세요.");return;}
+                    openKakao(start,batch);
+                });
+            }).show();
+    }
     String duration(double seconds){int m=(int)Math.ceil(seconds/60);return m>=60?(m/60)+"시간 "+(m%60)+"분":m+"분";}
     void timeline(){body.addView(heading("방문 타임라인",20));LinearLayout s=card(body);s.addView(text("출발",12,ORANGE));s.addView(heading(result.stops.get(0).name,17));s.addView(text(result.stops.get(0).address,13,MUTED));
         for(int i=0;i<result.companies.size();i++){Data.Place p=result.companies.get(i);LinearLayout c=card(body);c.addView(text("↓  "+leg(i),13,ORANGE));c.addView(heading((i+1)+"   "+p.name,19));c.addView(text(p.address,14,MUTED));c.addView(text("상담 "+p.minutes+"분"+(p.memo.isEmpty()?"":" · "+p.memo),14,MUTED));navigation(c,p);}
@@ -257,8 +312,16 @@ public class MainActivity extends Activity {
         else{scheme="nmap://navigation?dlat="+p.lat+"&dlng="+p.lon+"&dname="+name+"&appname="+getPackageName();web="https://map.naver.com/p/search/"+Uri.encode(p.name+" "+p.address);}
         try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(scheme)));}catch(ActivityNotFoundException e){if(kind.equals("TMAP"))new AlertDialog.Builder(this).setTitle("TMAP이 설치되어 있지 않습니다").setMessage("TMAP은 웹에서 차량 안내를 제공하지 않습니다. 설치 페이지를 열거나 카카오맵 웹 길찾기를 이용해 주세요.").setNegativeButton("취소",null).setNeutralButton("웹 길찾기",(d,w)->openWeb("https://map.kakao.com/link/to/"+name+","+p.lat+","+p.lon)).setPositiveButton("TMAP 설치",(d,w)->openWeb("https://play.google.com/store/apps/details?id=com.skt.tmap.ku")).show();else openWeb(web);}
     }
-    void openKakao(Data.Place start,Data.Place destination){
-        String query="sp="+start.lat+","+start.lon+"&ep="+destination.lat+","+destination.lon+"&by=car";
+    void openKakao(Data.Place start,Data.Place destination){openKakao(start,Collections.singletonList(destination));}
+    void openKakao(Data.Place start,List<Data.Place> stops){
+        if(stops.isEmpty()||stops.size()>6){toast("한 번에 보낼 방문지는 1~6곳이어야 합니다.");return;}
+        Data.Place destination=stops.get(stops.size()-1);
+        StringBuilder query=new StringBuilder("sp=").append(start.lat).append(",").append(start.lon);
+        for(int i=0;i<stops.size()-1;i++){
+            Data.Place p=stops.get(i);
+            query.append("&vp").append(i==0?"":Integer.toString(i+1)).append("=").append(p.lat).append(",").append(p.lon);
+        }
+        query.append("&ep=").append(destination.lat).append(",").append(destination.lon).append("&by=car");
         try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("kakaomap://route?"+query)));}
         catch(ActivityNotFoundException e){openWeb("https://m.map.kakao.com/scheme/route?"+query);}
     }
@@ -275,7 +338,7 @@ public class MainActivity extends Activity {
         v.addView(text("OSRM 시간은 실시간 교통·국내 통행 제한을 모두 반영하지 않습니다. 실제 운전은 내비게이션 안내를 따르세요.",14,ORANGE));
         EditText route=input(v,"도로 서버 HTTPS 주소",data.endpoint("routing"),17),search=input(v,"보조 검색 서버 HTTPS 주소",data.endpoint("search"),17),style=input(v,"지도 스타일 HTTPS 주소",data.endpoint("style"),17);
         full(v,button("JSON 백업 · 가져오기",false,this::backup));full(v,button("지도 데이터 출처",false,()->openWeb("https://www.openstreetmap.org/copyright")));
-        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.7").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
+        ScrollView scroll=new ScrollView(this);scroll.addView(v);AlertDialog d=new AlertDialog.Builder(this).setTitle("루트플래너 0.1.8").setView(scroll).setNegativeButton("닫기",null).setPositiveButton("저장",null).create();
         d.setOnShowListener(x->d.getButton(-1).setOnClickListener(w->{String[] values={route.getText().toString().trim(),search.getText().toString().trim(),style.getText().toString().trim()};for(String s:values){Uri u=Uri.parse(s);if(!"https".equals(u.getScheme())||u.getHost()==null||u.getUserInfo()!=null||u.getQuery()!=null||u.getFragment()!=null){toast("인증정보나 쿼리 없는 HTTPS 주소를 입력해 주세요.");return;}}
             data.prefs.edit().putString("routing",values[0].replaceAll("/+$","")).putString("search",values[1].replaceAll("/+$","")).putString("style",values[2]).apply();revision++;result=null;d.dismiss();loadStyle();render();}));d.show();
     }

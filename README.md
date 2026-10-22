@@ -41,6 +41,28 @@ JSON 내보내기·가져오기는 시스템 파일 선택기를 사용합니다
 
 TMAP·카카오맵·네이버지도는 Android URI로 실행합니다. 앱이 없으면 웹 링크로 연결합니다. TMAP 미설치 시 설치 페이지와 대체 웹 길찾기를 선택하도록 안내합니다. TMAP 웹에서 동일한 차량 안내가 가능하다고 가정하지 않습니다.
 
+## 최적화 순서대로 카카오맵에 보내기
+
+동선 최적화 후 요약 카드의 **카카오맵 · 경유지로 보내기**를 누릅니다. 방문지는 최적화 순서대로 기본 전체 선택되며 제외할 곳만 해제할 수 있습니다. 출발지 복귀·별도 도착지도 마지막 항목에 포함됩니다.
+
+카카오맵 공식 URL Scheme의 경유지 5개 + 목적지 1개 한도에 맞춰 최대 6곳씩 구간을 나눕니다. 구간과 전달 목록을 확인한 뒤 현재 위치에서 길찾기를 엽니다. 다음 구간은 해당 구간 방문 후 루트플래너에서 다시 선택합니다. 전송만으로 방문 완료를 처리하지 않습니다. 실제 도로와 시간은 카카오맵이 다시 계산합니다.
+
+앱이 없으면 동일한 경유지·목적지를 담은 모바일 웹을 엽니다. 카카오맵 6.0.0 이상에서의 경유지 지원이 공식 문서에 안내되어 있으며 실제 설치된 버전에서 전달 결과를 확인해야 합니다. TMAP·네이버지도의 기존 업체별 버튼은 단일 목적지용입니다. TMAP SDK의 경유지 5개 지원 기록은 확인했으나 현재 외부 호출 방식에 적용할 정확한 규격은 확보하지 못해 이번 변경에 포함하지 않았습니다.
+
+공식 근거(2026-10-23 한국 시각 확인): [카카오맵 Android URL Scheme](https://apis.map.kakao.com/android_v2/docs/api-guide/urlscheme/), [TMAP SDK 변경 기록](https://tmap-skopenapi.readme.io/reference/sdk).
+
+## Windows에서 수정본 설치
+
+기존 프로젝트 폴더의 PowerShell에서 다음을 실행합니다. USB 디버깅이 허용된 휴대폰 한 대와 Android SDK 35가 필요합니다.
+
+```powershell
+git pull --ff-only origin main
+if ($LASTEXITCODE -ne 0) { throw 'Git pull failed. Stop and share the error.' }
+powershell -ExecutionPolicy Bypass -File .\tests\windows-check.ps1 -SkipTests
+```
+
+위 명령은 테스트를 실행하지 않고 빌드 → 기존 앱 종료 → 데이터 유지 설치 → 실행·프로세스 확인을 진행합니다. 서명이 맞지 않으면 앱을 삭제하지 않고 중단합니다. 복원본에 Gradle wrapper JAR가 없으면 공식 SHA-256으로 확인한 Gradle 8.9를 프로젝트 내부에 내려받아 사용합니다. Windows 실행과 실제 경유지 전달은 대표님 PC·휴대폰에서 확인할 항목입니다.
+
 ## 빌드
 
 JDK 17, Android SDK platform 35, build-tools 35.0.0, Gradle 8.9가 필요합니다.

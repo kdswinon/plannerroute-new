@@ -1,7 +1,8 @@
 param(
     [string]$AndroidSdk = "$env:LOCALAPPDATA\Android\Sdk",
     [string]$JavaHome = '',
-    [switch]$Live
+    [switch]$Live,
+    [switch]$SkipTests
 )
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -51,6 +52,7 @@ $env:GRADLE_USER_HOME = "$PWD\.tooling\windows-gradle"
 $env:ANDROID_USER_HOME = "$PWD\.tooling\windows-android"
 $work = "$PWD\.tooling\windows-check"
 New-Item -ItemType Directory -Force "$work\classes-jdk17" | Out-Null
+if (-not $SkipTests) {
 $json = "$work\json-20240303.jar"
 $jsonHash = '3cf6cd6892e32e2b4c1c39e0f52f5248a2f5b37646fdfbb79a66b46b618414ed'
 if (-not (Test-Path $json) -or (Get-FileHash -LiteralPath $json -Algorithm SHA256).Hash -ne $jsonHash) {
@@ -65,7 +67,31 @@ $testArgs = @()
 if ($Live) { $testArgs += '--live' }
 & "$JavaHome\bin\java.exe" -cp "$work\classes-jdk17;$compileCp" com.plannerroute.app.CoreChecks "$work\runtime" @testArgs
 if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
-& .\gradlew.bat "-Dorg.gradle.java.home=$JavaHome" :app:assembleDebug --console=plain
+}
+if (Test-Path '.\gradle\wrapper\gradle-wrapper.jar') {
+    & .\gradlew.bat "-Dorg.gradle.java.home=$JavaHome" :app:assembleDebug --console=plain
+} else {
+    # Restored projects may not contain the binary wrapper JAR.
+    # Use a verified Gradle distribution inside the project instead.
+    $distRoot = "$PWD\.tooling\windows-gradle-dist"
+    New-Item -ItemType Directory -Force $distRoot | Out-Null
+    $distHash = ([string](Invoke-RestMethod -Uri 'https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256')).Trim()
+    if ($distHash -notmatch '^[0-9a-fA-F]{64}$') { throw 'Invalid Gradle checksum response.' }
+    $distZip = Join-Path $distRoot 'gradle-8.9-bin.zip'
+    if (-not (Test-Path $distZip) -or (Get-FileHash -LiteralPath $distZip -Algorithm SHA256).Hash -ne $distHash) {
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://services.gradle.org/distributions/gradle-8.9-bin.zip' -OutFile "$distZip.part"
+        if ((Get-FileHash -LiteralPath "$distZip.part" -Algorithm SHA256).Hash -ne $distHash) { throw 'Gradle checksum mismatch.' }
+        Move-Item -LiteralPath "$distZip.part" -Destination $distZip -Force
+    }
+    $gradle = Join-Path $distRoot 'gradle-8.9\bin\gradle.bat'
+    $distReady = Join-Path $distRoot '.plannerroute-ready'
+    if (-not (Test-Path $distReady) -or -not (Test-Path $gradle)) {
+        Expand-Archive -LiteralPath $distZip -DestinationPath $distRoot -Force
+        if (-not (Test-Path $gradle)) { throw 'Gradle extraction did not finish.' }
+        Set-Content -LiteralPath $distReady -Value $distHash -Encoding ascii
+    }
+    & $gradle "-Dorg.gradle.java.home=$JavaHome" :app:assembleDebug --console=plain
+}
 if ($LASTEXITCODE -ne 0) { throw 'APK build failed.' }
 $adb = "$AndroidSdk\platform-tools\adb.exe"
 if (-not (Test-Path $adb)) { throw 'Install Android SDK Platform-Tools in SDK Manager.' }
@@ -74,6 +100,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Device connection check failed.' }
 $devices = @($lines | Where-Object { $_ -match '^\S+\s+device$' })
 if ($devices.Count -ne 1) { throw 'Connect exactly one Android device and allow USB debugging on the phone.' }
 $serial = ($devices[0] -split '\s+')[0]
+& $adb -s $serial shell am force-stop com.plannerroute.app
+if ($LASTEXITCODE -ne 0) { throw 'Could not stop the existing app. Installation was not attempted.' }
 & $adb -s $serial install -r app/build/outputs/apk/debug/app-debug.apk
 if ($LASTEXITCODE -ne 0) { throw 'Install failed. Existing app/data were not removed. Check signing compatibility.' }
 & $adb -s $serial shell am start -W -n com.plannerroute.app/.MainActivity
