@@ -142,3 +142,8 @@ Android Studio에서도 폴더를 열어 빌드할 수 있습니다. 디버그 A
 - [카카오맵 웹 링크](https://apis.map.kakao.com/web/guide/#routeurl)
 
 실제 기기 화면·GPS·외부 내비 앱 연결은 기기에서 별도로 확인해야 합니다. 서버의 JSON 응답 확인은 기기 실행 확인과 다릅니다.
+
+
+## 정식 서명 APK 배포 준비
+
+다른 사람에게 전달할 정식 서명 APK는 [정식 서명·배포 안내](RELEASE.md)의 `scripts/windows-release.ps1`로 PC에서 만듭니다. 키와 비밀번호는 PC에만 보관하고, 기존 개발용 앱은 자동 교체하거나 삭제하지 않습니다. 실제 정식 APK 생성과 서명 검증은 PC 실행 후 확인할 항목입니다.

@@ -1,8 +1,9 @@
-param(
+﻿param(
     [string]$AndroidSdk = "$env:LOCALAPPDATA\Android\Sdk",
     [string]$JavaHome = '',
     [switch]$Live,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$ReleaseUnsigned
 )
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -52,7 +53,7 @@ $env:GRADLE_USER_HOME = "$PWD\.tooling\windows-gradle"
 $env:ANDROID_USER_HOME = "$PWD\.tooling\windows-android"
 $work = "$PWD\.tooling\windows-check"
 New-Item -ItemType Directory -Force "$work\classes-jdk17" | Out-Null
-if (-not $SkipTests) {
+if (-not $SkipTests -and -not $ReleaseUnsigned) {
 $json = "$work\json-20240303.jar"
 $jsonHash = '3cf6cd6892e32e2b4c1c39e0f52f5248a2f5b37646fdfbb79a66b46b618414ed'
 if (-not (Test-Path $json) -or (Get-FileHash -LiteralPath $json -Algorithm SHA256).Hash -ne $jsonHash) {
@@ -68,8 +69,9 @@ if ($Live) { $testArgs += '--live' }
 & "$JavaHome\bin\java.exe" -cp "$work\classes-jdk17;$compileCp" com.plannerroute.app.CoreChecks "$work\runtime" @testArgs
 if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
 }
+$buildTask = if ($ReleaseUnsigned) { ':app:assembleRelease' } else { ':app:assembleDebug' }
 if (Test-Path '.\gradle\wrapper\gradle-wrapper.jar') {
-    & .\gradlew.bat "-Dorg.gradle.java.home=$JavaHome" :app:assembleDebug --console=plain
+    & .\gradlew.bat "-Dorg.gradle.java.home=$JavaHome" $buildTask --console=plain
 } else {
     # Restored projects may not contain the binary wrapper JAR.
     # Use a verified Gradle distribution inside the project instead.
@@ -90,9 +92,14 @@ if (Test-Path '.\gradle\wrapper\gradle-wrapper.jar') {
         if (-not (Test-Path $gradle)) { throw 'Gradle extraction did not finish.' }
         Set-Content -LiteralPath $distReady -Value $distHash -Encoding ascii
     }
-    & $gradle "-Dorg.gradle.java.home=$JavaHome" :app:assembleDebug --console=plain
+    & $gradle "-Dorg.gradle.java.home=$JavaHome" $buildTask --console=plain
 }
 if ($LASTEXITCODE -ne 0) { throw 'APK build failed.' }
+if ($ReleaseUnsigned) {
+    if (-not (Test-Path '.\app\build\outputs\apk\release\app-release-unsigned.apk')) { throw 'Unsigned release APK missing.' }
+    Write-Host 'Unsigned release built. No device installation was attempted.'
+    return
+}
 $adb = "$AndroidSdk\platform-tools\adb.exe"
 if (-not (Test-Path $adb)) { throw 'Install Android SDK Platform-Tools in SDK Manager.' }
 $lines = & $adb devices
