@@ -39,7 +39,7 @@ public class MainActivity extends Activity {
     LinearLayout root,body,nav,mapWarnings; MapView mapView; MapLibreMap map; Style mapStyle;
     final Set<String> pinImages=new HashSet<>();
     ScrollView contentScroll; int renderedPage=-1;
-    int page=0,revision=0,pickMode=0; boolean busy=false; String status="",mapError="";
+    int page=0,revision=0,pickMode=0,calculationGeneration=0; boolean busy=false; String status="",mapError="";
     LocationManager locations; LocationListener gpsListener; Runnable gpsTimeout; Action<Data.Place> pendingLocation;
     interface Action<T>{void accept(T value);}
     @Override public void onCreate(Bundle saved){super.onCreate(saved);MapLibre.getInstance(this);data=new Data(this);routing=new Routing(this,data);addressSearch=new AndroidAddressSearch(this);
@@ -71,18 +71,18 @@ public class MainActivity extends Activity {
         if(mapView!=null&&mapView.getParent()!=null)((android.view.ViewGroup)mapView.getParent()).removeView(mapView);
         root=column();root.setBackgroundColor(BG);root.setFitsSystemWindows(true);setContentView(root);
         root.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets.consumeSystemWindowInsets();});
-        LinearLayout header=row();header.setPadding(dp(20),dp(10),dp(14),dp(8));LinearLayout title=column();title.addView(text("PLANNERROUTE",11,ORANGE));title.addView(heading(new String[]{"오늘의 방문 동선","업체 관리","동선 지도","오늘의 통계"}[page],25));header.addView(title,new LinearLayout.LayoutParams(0,-2,1));header.addView(button("설정",false,this::settings));root.addView(header);
+        LinearLayout header=row();header.setPadding(dp(20),dp(10),dp(14),dp(8));LinearLayout title=column();title.addView(text("PLANNERROUTE",11,ORANGE));title.addView(heading(new String[]{"이번 방문 동선","업체 관리","동선 지도","이번 방문 계획"}[page],25));header.addView(title,new LinearLayout.LayoutParams(0,-2,1));header.addView(button("설정",false,this::settings));root.addView(header);
         ScrollView scroll=new ScrollView(this);contentScroll=scroll;scroll.setFillViewport(true);body=column();body.setPadding(dp(16),dp(8),dp(16),dp(16));scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));scroll.post(()->scroll.scrollTo(0,scrollY));
         if(!status.isEmpty()){LinearLayout c=card(body);c.addView(text(status,14,ORANGE));if(data.recoveryRequired)full(c,button("백업 파일에서 복구",false,this::backup));}
         if(page==0)today();else if(page==1)companies();else if(page==2)mapPage();else statistics();
-        nav=row();nav.setPadding(dp(6),dp(6),dp(6),dp(6));nav.setBackgroundColor(CARD);String[] labels={"◉\n오늘 동선","▤\n업체 관리","⌖\n지도","▥\n통계"};
-        for(int i=0;i<4;i++){final int tab=i;Button b=button(labels[i],false,()->{page=tab;pickMode=0;render();});b.setTextColor(page==i?ORANGE:MUTED);b.setBackground(bg(page==i?SECOND:CARD,14));b.setContentDescription(new String[]{"오늘 동선","업체 관리","지도","통계"}[i]);weighted(nav,b);}root.addView(nav);updateMap(false);
+        nav=row();nav.setPadding(dp(6),dp(6),dp(6),dp(6));nav.setBackgroundColor(CARD);String[] labels={"◉\n방문 동선","▤\n업체 관리","⌖\n지도","▥\n계획"};
+        for(int i=0;i<4;i++){final int tab=i;Button b=button(labels[i],false,()->{page=tab;pickMode=0;render();});b.setTextColor(page==i?ORANGE:MUTED);b.setBackground(bg(page==i?SECOND:CARD,14));b.setContentDescription(new String[]{"방문 동선","업체 관리","지도","방문 계획"}[i]);weighted(nav,b);}root.addView(nav);updateMap(false);
     }
     void today(){
-        LinearLayout intro=card(body);intro.addView(heading("운전 전에, 오늘 동선 한눈에",18));intro.addView(text("방문 업체를 고르면 도로 기준 순서를 찾아드려요.",13,MUTED));
+        LinearLayout intro=card(body);intro.addView(heading("운전 전에, 방문 동선 한눈에",18));intro.addView(text("방문 업체를 고르면 도로 기준 순서를 찾아드려요.",13,MUTED));planActions(intro);
         LinearLayout start=card(body);start.addView(text("01  출발지",12,ORANGE));start.addView(heading(data.start==null?"어디서 출발하시나요?":data.start.name,18));
         if(data.start!=null)start.addView(text(data.start.address,13,MUTED));LinearLayout sr=row();weighted(sr,button("장소 검색",false,()->search(p->{data.start=p;changed();render();})));weighted(sr,button("현재 위치",false,this::gps));weighted(sr,button("지도 선택",false,()->pick(1)));start.addView(sr);
-        LinearLayout selected=card(body);LinearLayout top=row();top.addView(heading("02  오늘 방문 업체",18),new LinearLayout.LayoutParams(0,-2,1));top.addView(button("전체 선택",false,()->{boolean all=!data.places.isEmpty()&&data.selected().size()==data.places.size();for(Data.Place p:data.places)p.today=!all;changed();render();}));selected.addView(top);
+        LinearLayout selected=card(body);LinearLayout top=row();top.addView(heading("02  이번 방문 업체",18),new LinearLayout.LayoutParams(0,-2,1));top.addView(button("전체 선택",false,()->{boolean all=!data.places.isEmpty()&&data.selected().size()==data.places.size();for(Data.Place p:data.places)p.today=!all;changed();render();}));selected.addView(top);
         selected.addView(text(data.selected().size()+"개 선택 · 최대 40개 최적화",13,MUTED));
         if(data.places.isEmpty()){selected.addView(text("등록된 업체가 없습니다. 첫 방문 업체를 추가해 보세요.",15,MUTED));full(selected,button("＋ 업체 등록",false,()->editCompany(null,null)));}
         else for(Data.Place p:data.places){CheckBox box=new CheckBox(this);box.setText(p.name+"  ·  상담 "+p.minutes+"분");box.setTextColor(WHITE);box.setTextSize(16);box.setMinHeight(dp(48));box.setButtonTintList(ColorStateList.valueOf(ORANGE));box.setChecked(p.today);box.setOnCheckedChangeListener((v,on)->{if(p.today!=on){p.today=on;changed();render();}});selected.addView(box);}
@@ -90,11 +90,11 @@ public class MainActivity extends Activity {
         for(int i=0;i<3;i++){RadioButton r=new RadioButton(this);r.setId(100+i);r.setText(labels[i]);r.setTextColor(WHITE);r.setMinHeight(dp(48));r.setButtonTintList(ColorStateList.valueOf(ORANGE));modes.addView(r);}modes.check(100+data.endMode);
         modes.setOnCheckedChangeListener((g,id)->{data.endMode=id-100;changed();render();});end.addView(modes);
         if(data.endMode==2){end.addView(text(data.destination==null?"도착지를 선택해 주세요.":data.destination.name+"\n"+data.destination.address,15,MUTED));LinearLayout er=row();weighted(er,button("장소 검색",false,()->search(p->{data.destination=p;changed();render();})));weighted(er,button("지도 선택",false,()->pick(2)));end.addView(er);}
-        Button optimize=button(busy?"도로 이동시간을 계산하고 있어요…":"오늘 동선 최적화 →",true,this::optimize);optimize.setEnabled(!busy);full(body,optimize);
+        Button optimize=button(busy?"도로 이동시간을 계산하고 있어요…":"방문 동선 최적화 →",true,this::optimize);optimize.setEnabled(!busy);full(body,optimize);
         body.addView(text("실시간 교통은 반영되지 않습니다. 주행 중 조작하지 마세요.",12,MUTED));
         if(result!=null){summary();mapBlock(380);timeline();}else {LinearLayout info=card(body);info.addView(text("출발지 → 방문 업체 → 도착지\n최적화 후 지도와 방문 순서가 여기에 표시됩니다.",15,MUTED));}
     }
-    void summary(){LinearLayout c=card(body);c.addView(text("TODAY’S ROUTE",11,ORANGE));c.addView(heading(String.format(Locale.KOREA,"%d곳  ·  %.1f km",result.companies.size(),result.meters/1000),27));
+    void summary(){LinearLayout c=card(body);c.addView(text("이번 방문 계획",11,ORANGE));c.addView(heading(String.format(Locale.KOREA,"%d곳  ·  %.1f km",result.companies.size(),result.meters/1000),27));
         c.addView(text("운전 "+duration(result.seconds)+"  +  상담 "+duration(result.consultation*60),15,MUTED));c.addView(heading("총 예상 "+duration(result.seconds+result.consultation*60),20));
         c.addView(text(result.exact?"도로 시간 행렬 기준 최적 순서 · 실시간 교통 미반영":"많은 방문지를 위한 근사 최적화 · 실시간 교통 미반영",12,MUTED));
         full(c,button("카카오맵 · 경유지로 보내기",true,()->chooseRouteStops("카카오맵")));
@@ -168,7 +168,7 @@ public class MainActivity extends Activity {
         for(Data.Place p:data.places){LinearLayout c=card(body);c.addView(heading(p.name,20));c.addView(text(p.address,14,MUTED));c.addView(text("상담 "+p.minutes+"분"+(p.phone.isEmpty()?"":" · "+p.phone),14,MUTED));if(!p.memo.isEmpty())c.addView(text(p.memo,14,MUTED));
             LinearLayout r=row();weighted(r,button("수정",false,()->editCompany(p,null)));weighted(r,button("삭제",false,()->new AlertDialog.Builder(this).setTitle("업체 삭제").setMessage(p.name+" 업체를 삭제할까요?").setNegativeButton("취소",null).setPositiveButton("삭제",(d,w)->{data.places.remove(p);changed();render();}).show()));c.addView(r);}
     }
-    void statistics(){if(result!=null){summary();timeline();}else{LinearLayout c=card(body);c.addView(heading("오늘 동선을 먼저 계산해 주세요",20));c.addView(text("운전시간과 상담시간을 합친 하루 예상 소요시간을 보여드립니다.",15,MUTED));full(c,button("오늘 동선으로",true,()->{page=0;render();}));}LinearLayout c=card(body);c.addView(text("등록 업체 "+data.places.size()+"개\n오늘 선택 "+data.selected().size()+"개\n오늘 상담 합계 "+duration(data.selected().stream().mapToInt(p->p.minutes).sum()*60),16,WHITE));}
+    void statistics(){LinearLayout plan=card(body);planActions(plan);if(result!=null){summary();timeline();}else{LinearLayout c=card(body);c.addView(heading("방문 동선을 먼저 계산해 주세요",20));c.addView(text("운전시간과 상담시간을 합친 이번 계획의 예상 소요시간을 보여드립니다.",15,MUTED));full(c,button("방문 동선으로",true,()->{page=0;render();}));}LinearLayout c=card(body);c.addView(text("등록 업체 "+data.places.size()+"개\n이번 선택 "+data.selected().size()+"개\n예상 상담 합계 "+duration(data.selected().stream().mapToInt(p->p.minutes).sum()*60),16,WHITE));}
     void mapPage(){if(pickMode!=0){LinearLayout c=card(body);c.addView(text((pickMode==1?"출발지":"도착지")+"로 사용할 위치를 지도에서 눌러 주세요.",16,ORANGE));full(c,button("선택 취소",false,()->{pickMode=0;render();}));}mapBlock(480);body.addView(text("지도를 길게 누르면 출발지·도착지 설정 또는 업체 등록이 가능합니다.",14,MUTED));if(result!=null)summary();}
     void mapBlock(int height){LinearLayout c=card(body);LinearLayout r=row();r.addView(heading("방문 동선 지도",17),new LinearLayout.LayoutParams(0,-2,1));r.addView(button("지도",false,this::chooseMap));r.addView(button("전체 보기",false,()->updateMap(true)));c.addView(r);
         mapWarnings=column();c.addView(mapWarnings);showMapError(mapError);
@@ -214,11 +214,32 @@ public class MainActivity extends Activity {
         }return id;
     }
     void pick(int mode){pickMode=mode;page=2;render();}
+    void planActions(LinearLayout into){
+        into.addView(text("실제 방문 완료 기록이 아닌 예상 계획입니다. 선택은 날짜가 바뀌어도 유지됩니다.",13,MUTED));
+        full(into,button("새 방문 계획",false,this::newVisitPlan));
+    }
+    void newVisitPlan(){
+        if(data.recoveryRequired){toast("원본 보호를 위해 백업 파일을 먼저 복구해 주세요.");return;}
+        new AlertDialog.Builder(this).setTitle("새 방문 계획")
+            .setMessage("선택한 업체와 계산한 동선을 비울까요?\n등록 업체·주소·메모와 출발지·도착 방식·도착지는 유지됩니다. 진행 중인 동선 계산은 취소합니다.")
+            .setNegativeButton("취소",null).setPositiveButton("새 계획 시작",(dialog,which)->{
+                List<Data.Place> previous=data.selected();
+                for(Data.Place p:previous)p.today=false;
+                if(!data.save()){
+                    for(Data.Place p:previous)p.today=true;
+                    toast("선택을 초기화하지 못했습니다. 저장 공간을 확인해 주세요.");return;
+                }
+                revision++;calculationGeneration++;busy=false;result=null;pickMode=0;
+                stopGps();pendingLocation=null;
+                status="새 방문 계획을 시작합니다. 방문 업체를 선택해 주세요.";
+                page=0;render();
+            }).show();
+    }
     void changed(){revision++;result=null;status="";if(!data.save())status=data.recoveryRequired?"원본 저장자료를 보호하기 위해 저장을 중단했습니다. 정상 백업 파일을 가져와 주세요.":"저장 공간을 확인해 주세요. 이번 변경을 저장하지 못했습니다.";updateMap(false);}
     void optimize(){if(busy)return;if(data.start==null){toast("출발지를 먼저 선택해 주세요.");return;}if(data.endMode==2&&data.destination==null){toast("도착지를 먼저 선택해 주세요.");return;}
         List<Data.Place> selected=data.selected();if(selected.isEmpty()||selected.size()>40){toast("업체를 1~40개 선택해 주세요.");return;}
-        final int token=revision,mode=data.endMode;Data.Place start=data.start,end=data.destination;busy=true;status="도로 이동시간을 비교하고 있습니다.";render();
-        worker.execute(()->{try{Routing.Result r=routing.calculate(start,selected,end,mode);handler.post(()->{busy=false;if(token==revision){result=r;status="";render();mapView.post(()->updateMap(true));}else{status="조건이 바뀌었습니다. 동선을 다시 계산해 주세요.";render();}});}catch(Exception e){handler.post(()->{busy=false;if(token==revision){result=null;status="동선 계산 실패 · "+message(e);}render();});}});
+        final int token=revision,mode=data.endMode,job=++calculationGeneration;Data.Place start=data.start,end=data.destination;busy=true;status="도로 이동시간을 비교하고 있습니다.";render();
+        worker.execute(()->{try{Routing.Result r=routing.calculate(start,selected,end,mode);handler.post(()->{if(job!=calculationGeneration)return;busy=false;if(token==revision){result=r;status="";render();mapView.post(()->updateMap(true));}else{status="조건이 바뀌었습니다. 동선을 다시 계산해 주세요.";render();}});}catch(Exception e){handler.post(()->{if(job!=calculationGeneration)return;busy=false;if(token==revision){result=null;status="동선 계산 실패 · "+message(e);}render();});}});
     }
     void search(Action<Data.Place> done){LinearLayout v=column();v.setPadding(dp(20),dp(4),dp(20),dp(12));EditText q=input(v,"주소 또는 장소명","",1);v.addView(text("휴대폰 주소 검색을 우선 사용합니다. 결과의 도로명과 건물번호가 맞는지 확인해 주세요.",13,MUTED));
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("주소·장소 검색").setView(v).setNegativeButton("취소",null).setPositiveButton("검색",null).create();dialog.setOnShowListener(x->dialog.getButton(-1).setOnClickListener(x2->{String query=q.getText().toString().trim();if(query.length()<2){q.setError("두 글자 이상 입력해 주세요.");return;}Button b=dialog.getButton(-1);b.setEnabled(false);b.setText("검색 중…");
